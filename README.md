@@ -2,6 +2,8 @@
 
 이 프로젝트는 `docs/로그프레소 쿼리.docx`를 인덱싱하고, 한국어 자연어 요청을 로그프레소 쿼리 초안으로 변환합니다. 생성된 쿼리는 문서 인덱스 기반으로 검증하며, 부족한 테이블명이나 필드명은 임의로 만들지 않고 확인 질문으로 반환합니다.
 
+> 공개 배포 주의: `docs/로그프레소 쿼리.docx`에는 재배포 허가나 라이선스 문구가 확인되지 않습니다. 공개 저장소에 유지하기 전에 문서 권리자에게 공개·재배포 가능 여부를 확인하세요.
+
 ## 지원 기능
 
 - DOCX 문단과 표 추출
@@ -22,6 +24,8 @@
 - 고유값/고유 개수 조회
 - 그룹별 첫 번째/마지막 대표 로그: `first(line)`, `last(message)`
 - `fulltext` 전체 텍스트 검색
+- `logger window=... NAMESPACE\\LOGGER` 실시간 로그 수집기 조회
+- `.evtx`, `.eml`, `.lnk` 파일 경로 기반 문서 명령 생성
 - `set`과 `$()`를 이용한 동적 기간 매개변수 예제
 
 ## 설치
@@ -29,7 +33,7 @@
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .[dev]
+pip install -c requirements.lock -e .[dev]
 ```
 
 Linux/macOS:
@@ -37,7 +41,7 @@ Linux/macOS:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .[dev]
+pip install -c requirements.lock -e .[dev]
 ```
 
 ## 환경 변수
@@ -219,7 +223,7 @@ pytest
 정상 기준:
 
 ```text
-139 passed
+148 passed
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.
@@ -227,6 +231,8 @@ pytest
 ```bash
 python -m unittest discover -s tests
 ```
+
+`requirements.lock`은 검증된 전체 의존성 버전을 고정합니다. 의존성을 변경할 때는 Python 3.12 가상환경에서 전체 테스트를 통과한 뒤 lock 파일도 함께 갱신하세요.
 
 ## Docker
 

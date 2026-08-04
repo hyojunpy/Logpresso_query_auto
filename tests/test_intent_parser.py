@@ -6,6 +6,45 @@ from app.services.intent_parser import IntentParser
 
 
 class IntentParserTest(unittest.TestCase):
+    def test_extracts_logger_source(self):
+        payload = GenerateQueryRequest(
+            request=r"local\sample1, local\sample2 로그 수집기를 10초간 보여줘",
+            context=RequestContext(known_fields=["message"]),
+        )
+        intent = IntentParser().parse(payload)
+        self.assertEqual(intent.source_type, "logger")
+        self.assertEqual(intent.query_type, "realtime")
+        self.assertEqual(intent.loggers, [r"local\sample1", r"local\sample2"])
+        self.assertEqual(intent.logger_window, "10s")
+        self.assertEqual(intent.tables, [])
+        self.assertEqual(intent.missing_information, [])
+
+    def test_logger_needs_namespace_name_and_window(self):
+        intent = IntentParser().parse(GenerateQueryRequest(request="로그 수집기 보여줘"))
+        self.assertEqual(intent.source_type, "logger")
+        self.assertIn("조회할 로그 수집기 이름", intent.missing_information)
+        self.assertIn("실시간 조회 기간", intent.missing_information)
+
+    def test_extracts_evtx_file_source(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(request=r"D:\data\evtx\System.evtx 파일을 조회해줘")
+        )
+        self.assertEqual(intent.source_type, "file")
+        self.assertEqual(intent.file_command, "evtx-file")
+        self.assertEqual(intent.file_path, r"D:\data\evtx\System.evtx")
+        self.assertEqual(intent.tables, [])
+
+    def test_file_source_needs_path(self):
+        intent = IntentParser().parse(GenerateQueryRequest(request="파일을 조회해줘"))
+        self.assertEqual(intent.source_type, "file")
+        self.assertIn("조회할 파일 경로", intent.missing_information)
+
+    def test_file_path_with_spaces_needs_clarification(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(request=r'"D:\event logs\System.evtx" 파일을 조회해줘')
+        )
+        self.assertIn("공백 없는 파일 경로", intent.missing_information)
+
     def test_extracts_firewall_count_request(self):
         payload = GenerateQueryRequest(
             request="최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘",

@@ -1,11 +1,12 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from contextlib import closing
 import time
 import unittest
 
 from docx import Document
 
-from app.services.indexer import DocumentIndex
+from app.services.indexer import DocumentIndex, INDEX_FORMAT_VERSION
 
 
 def write_docx(path: Path, body: str) -> None:
@@ -16,6 +17,21 @@ def write_docx(path: Path, body: str) -> None:
 
 
 class DocumentIndexTest(unittest.TestCase):
+    def test_old_index_format_is_stale(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc_path = root / "manual.docx"
+            write_docx(doc_path, "table sample_logs")
+            index = DocumentIndex(root / "index.db")
+            index.rebuild(doc_path)
+            with closing(index.connect()) as conn:
+                conn.execute(
+                    "update metadata set value = ? where key = 'index_format_version'",
+                    (str(int(INDEX_FORMAT_VERSION) - 1),),
+                )
+                conn.commit()
+            self.assertTrue(index.status(doc_path)["stale"])
+
     def test_ensure_current_indexes_once_until_document_changes(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -12,6 +12,7 @@ from app.models.document import DocumentChunk
 COMMAND_HINTS = {
     "table", "search", "stats", "rollup", "timechart", "sort", "limit", "set", "setq",
     "stream", "fulltext", "logger", "fields", "eval", "rename", "where",
+    "evtx-file", "eml-file", "lnk-file",
 }
 
 FUNCTION_HINTS = {"count", "sum", "avg", "min", "max", "first", "last", "ago", "now", "str", "dateadd"}
@@ -110,7 +111,7 @@ class DocxParser:
 
     def _classify(self, content: str) -> tuple[str | None, str, str]:
         lowered = content.lower()
-        tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", lowered)
+        tokens = re.findall(r"[a-zA-Z_][a-zA-Z0-9_-]*", lowered)
         for token in tokens:
             if token in COMMAND_HINTS:
                 if "syntax" in lowered or "문법" in content:

@@ -13,6 +13,31 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_generates_logger_query(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request=r"local\sample1, local\sample2 로그 수집기를 10초간 보여줘",
+                context=RequestContext(known_fields=["message"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, r"logger window=10s local\sample1, local\sample2")
+        self.assertIn("logger", response.validation.commands)
+
+    def test_logger_query_needs_clarification(self):
+        response = generator().generate(GenerateQueryRequest(request="로그 수집기 보여줘"))
+        self.assertEqual(response.status, "needs_clarification")
+        self.assertTrue(any("네임스페이스" in question for question in response.questions))
+        self.assertTrue(any("기간" in question for question in response.questions))
+
+    def test_generates_evtx_file_query(self):
+        response = generator().generate(
+            GenerateQueryRequest(request=r"D:\data\evtx\System.evtx 파일을 조회해줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, r"evtx-file D:\data\evtx\System.evtx")
+        self.assertIn("evtx-file", response.validation.commands)
+
     def test_references_only_generated_commands_when_possible(self):
         response = generator().generate(
             GenerateQueryRequest(

@@ -43,10 +43,19 @@ class IntentParser:
         intent.time_range = self._time_range(text)
         intent.query_type = "adhoc"
         intent.source_type = self._source_type(text)
-        intent.tables = self._tables(text, context.known_tables, allow_single_default=intent.source_type != "fulltext")
+        intent.tables = self._tables(
+            text,
+            context.known_tables,
+            allow_single_default=intent.source_type == "table",
+        ) if intent.source_type in {"table", "fulltext"} else []
         intent.fulltext_expression = self._fulltext_expression(text) if intent.source_type == "fulltext" else None
         intent.use_parameterized_time_range = self._looks_like_parameterized_time_range(text)
         intent.streams = self._streams(text) if intent.source_type == "stream" else []
+        intent.loggers = self._loggers(text) if intent.source_type == "logger" else []
+        intent.logger_window = self._logger_window(text) if intent.source_type == "logger" else None
+        if intent.source_type == "file":
+            intent.file_path = self._file_path(text)
+            intent.file_command = self._file_command(intent.file_path)
         intent.selected_fields = self._selected_fields(text, context.known_fields)
         intent.computed_fields = self._computed_fields(text, context.known_fields)
         intent.renames = self._renames(text, context.known_fields)
@@ -65,6 +74,8 @@ class IntentParser:
             intent.query_type = "scheduled"
         if intent.source_type == "stream":
             intent.query_type = "stream"
+        if intent.source_type == "logger":
+            intent.query_type = "realtime"
 
         self._collect_missing_information(intent, text, context.known_fields)
         return intent
@@ -74,6 +85,10 @@ class IntentParser:
             return "stream"
         if self._looks_like_fulltext(text):
             return "fulltext"
+        if any(word in text.lower() for word in ("logger", "로거", "로그 수집기")):
+            return "logger"
+        if self._file_path(text) or "파일" in text:
+            return "file"
         return "table"
 
     def _time_range(self, text: str) -> TimeRange | None:
@@ -256,6 +271,35 @@ class IntentParser:
 
     def _streams(self, text: str) -> list[str]:
         return re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*스트림", text)
+
+    def _loggers(self, text: str) -> list[str]:
+        return list(dict.fromkeys(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*\\[A-Za-z_][A-Za-z0-9_*.-]*)\b", text)))
+
+    def _logger_window(self, text: str) -> str | None:
+        units = {"초": "s", "분": "m", "시간": "h", "일": "d", "주": "w"}
+        match = re.search(r"(\d+)\s*(초|분|시간|일|주)\s*(?:간|동안)?", text)
+        if match:
+            return f"{match.group(1)}{units[match.group(2)]}"
+        match = re.search(r"\bwindow\s*=\s*(\d+(?:y|mon|w|d|h|m|s))\b", text, flags=re.IGNORECASE)
+        return match.group(1).lower() if match else None
+
+    def _file_path(self, text: str) -> str | None:
+        quoted = re.search(r"['\"]([^'\"]+\.(?:evtx|eml|lnk))['\"]", text, flags=re.IGNORECASE)
+        if quoted:
+            return quoted.group(1)
+        match = re.search(r"(?:[A-Za-z]:\\|/)[^\s'\"]+\.(?:evtx|eml|lnk)\b", text, flags=re.IGNORECASE)
+        return match.group(0) if match else None
+
+    def _file_command(self, path: str | None) -> str | None:
+        if not path:
+            return None
+        extension_commands = {
+            ".evtx": "evtx-file",
+            ".eml": "eml-file",
+            ".lnk": "lnk-file",
+        }
+        lowered = path.lower()
+        return next((command for extension, command in extension_commands.items() if lowered.endswith(extension)), None)
 
     def _filters(
         self,
@@ -704,6 +748,16 @@ class IntentParser:
             intent.missing_information.append("조회할 로그프레소 테이블 이름")
         if intent.source_type == "stream" and not intent.streams:
             intent.missing_information.append("조회할 스트림 이름")
+        if intent.source_type == "logger" and not intent.loggers:
+            intent.missing_information.append("조회할 로그 수집기 이름")
+        if intent.source_type == "logger" and not intent.logger_window:
+            intent.missing_information.append("실시간 조회 기간")
+        if intent.source_type == "file" and not intent.file_path:
+            intent.missing_information.append("조회할 파일 경로")
+        if intent.source_type == "file" and intent.file_path and not intent.file_command:
+            intent.missing_information.append("파일 형식에 맞는 명령")
+        if intent.source_type == "file" and intent.file_path and any(char.isspace() for char in intent.file_path):
+            intent.missing_information.append("공백 없는 파일 경로")
         if intent.source_type == "fulltext" and not intent.fulltext_expression:
             intent.missing_information.append("전체 텍스트 검색어")
         if intent.source_type != "fulltext" and any(word in text for word in ERROR_WORDS + DENY_WORDS) and not intent.filters:

@@ -46,6 +46,9 @@ class QueryIntent(BaseModel):
     tables: list[str] = []
     loggers: list[str] = []
     streams: list[str] = []
+    logger_window: str | None = None
+    file_command: str | None = None
+    file_path: str | None = None
     fulltext_expression: str | None = None
     time_range: TimeRange | None = None
     use_parameterized_time_range: bool = False

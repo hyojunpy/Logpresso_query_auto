@@ -10,6 +10,9 @@ class DocxParserTest(unittest.TestCase):
         self.assertGreater(len(chunks), 50)
         names = {chunk.entry_name for chunk in chunks if chunk.entry_name}
         self.assertIn("table", names)
+        self.assertIn("evtx-file", names)
+        self.assertIn("eml-file", names)
+        self.assertIn("lnk-file", names)
 
     def test_extracts_option_and_function_metadata(self):
         chunks = DocxParser().parse(Path("docs") / "로그프레소 쿼리.docx")

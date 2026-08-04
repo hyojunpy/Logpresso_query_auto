@@ -25,7 +25,7 @@ class QueryGenerator:
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         intent = self.intent_parser.parse(payload)
-        search_text = f"{payload.request} table fulltext search stats rollup timechart eval fields rename first last set setq"
+        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file search stats rollup timechart eval fields rename first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:
             return GenerateQueryResponse(
@@ -106,6 +106,10 @@ class QueryGenerator:
     def _template_query(self, intent: QueryIntent) -> str:
         if intent.source_type == "fulltext":
             return self._fulltext_query(intent)
+        if intent.source_type == "logger":
+            return self._logger_query(intent)
+        if intent.source_type == "file":
+            return self._file_query(intent)
         if not intent.tables:
             raise ValueError("table is required to generate a table query")
         if intent.use_parameterized_time_range:
@@ -142,6 +146,20 @@ class QueryGenerator:
             lines.append(f"| sort {prefix}{sort.field}")
         if intent.limit:
             lines.append(f"| limit {intent.limit}")
+        return "\n".join(lines)
+
+    def _logger_query(self, intent: QueryIntent) -> str:
+        if not intent.loggers or not intent.logger_window:
+            raise ValueError("logger name and window are required to generate a logger query")
+        lines = [f"logger window={intent.logger_window} {', '.join(intent.loggers)}"]
+        lines.extend(self._filter_lines(intent))
+        return "\n".join(lines)
+
+    def _file_query(self, intent: QueryIntent) -> str:
+        if not intent.file_command or not intent.file_path:
+            raise ValueError("documented file command and path are required to generate a file query")
+        lines = [f"{intent.file_command} {intent.file_path}"]
+        lines.extend(self._filter_lines(intent))
         return "\n".join(lines)
 
     def _parameterized_table_query(self, intent: QueryIntent) -> str:
@@ -235,6 +253,11 @@ class QueryGenerator:
         mapping = {
             "조회할 로그프레소 테이블 이름": "조회할 로그프레소 테이블 이름은 무엇인가요?",
             "조회할 스트림 이름": "조회할 스트림 이름은 무엇인가요?",
+            "조회할 로그 수집기 이름": "조회할 로그 수집기 이름을 네임스페이스와 함께 알려주세요. 예: local\\sample1",
+            "실시간 조회 기간": "로그 수집기를 실시간으로 조회할 기간은 얼마인가요? 예: 10초",
+            "조회할 파일 경로": "조회할 파일의 전체 경로는 무엇인가요?",
+            "파일 형식에 맞는 명령": "파일 형식을 확인할 수 없습니다. 지원할 파일 종류와 경로를 알려주세요.",
+            "공백 없는 파일 경로": "문서에서 공백 포함 경로의 인용 문법을 확인하지 못했습니다. 공백이 없는 경로를 알려주세요.",
             "필터에 사용할 필드명과 값": "필터에 사용할 필드명과 값은 무엇인가요?",
             "비교 조건에 사용할 필드명과 값": "비교 조건에 사용할 필드명과 값은 무엇인가요? 예: kernel + user가 80 이상",
             "IP 집계에 사용할 필드명": "IP 집계에 사용할 필드명은 무엇인가요? 예: src_ip",
@@ -330,6 +353,10 @@ class QueryGenerator:
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 테이블과 조회 기간으로 원본 로그를 읽습니다."))
             elif line.startswith("fulltext"):
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 문자열 또는 IP를 전체 텍스트 검색 문법으로 조회합니다."))
+            elif line.startswith("logger"):
+                explanations.append(QueryExplanation(query_part=line, reason="지정한 로그 수집기의 데이터를 정해진 기간 동안 실시간으로 조회합니다."))
+            elif re.match(r"^(?:evtx|eml|lnk)-file\b", line):
+                explanations.append(QueryExplanation(query_part=line, reason="파일 형식에 맞는 문서 기반 명령으로 파일 내용을 조회합니다."))
             elif line.startswith("| search"):
                 explanations.append(QueryExplanation(query_part=line, reason="사용자 요청에서 추출한 필터 조건을 적용합니다."))
             elif line.startswith("| eval"):

@@ -14,6 +14,7 @@ from app.services.docx_parser import DocxParser
 
 
 TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9_.$()]+")
+INDEX_FORMAT_VERSION = "2"
 
 
 def tokenize(text: str) -> list[str]:
@@ -95,6 +96,7 @@ class DocumentIndex:
                     ("doc_path", str(doc_path)),
                     ("doc_mtime", str(stat.st_mtime)),
                     ("doc_size", str(stat.st_size)),
+                    ("index_format_version", INDEX_FORMAT_VERSION),
                     ("chunk_count", str(len(chunks))),
                 ],
             )
@@ -116,7 +118,11 @@ class DocumentIndex:
         stale = True
         if indexed and doc_path.exists():
             stat = doc_path.stat()
-            stale = meta.get("doc_mtime") != str(stat.st_mtime) or meta.get("doc_size") != str(stat.st_size)
+            stale = (
+                meta.get("doc_mtime") != str(stat.st_mtime)
+                or meta.get("doc_size") != str(stat.st_size)
+                or meta.get("index_format_version") != INDEX_FORMAT_VERSION
+            )
         return {
             "indexed": indexed,
             "stale": stale,
