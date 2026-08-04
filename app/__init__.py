@@ -1,0 +1,2 @@
+"""Logpresso query assistant package."""
+

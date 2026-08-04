@@ -1,0 +1,81 @@
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class TimeRange(BaseModel):
+    mode: Literal["duration", "absolute", "unknown"] = "unknown"
+    duration: str | None = None
+    from_: str | None = Field(default=None, alias="from")
+    to: str | None = None
+
+
+class FilterCondition(BaseModel):
+    field: str
+    operator: str = "=="
+    value: str
+    value_type: str = "string"
+    conjunction: Literal["and", "or"] = "and"
+
+
+class ComputedField(BaseModel):
+    name: str
+    expression: str
+
+
+class Aggregation(BaseModel):
+    function: str
+    field: str | None = None
+    alias: str | None = None
+
+
+class SortCondition(BaseModel):
+    field: str
+    direction: Literal["asc", "desc"] = "asc"
+
+
+class RenameOperation(BaseModel):
+    field: str
+    new_name: str
+
+
+class QueryIntent(BaseModel):
+    objective: str
+    query_type: Literal["adhoc", "realtime", "stream", "scheduled", "unknown"] = "unknown"
+    source_type: Literal["table", "logger", "stream", "fulltext", "file", "unknown"] = "unknown"
+    tables: list[str] = []
+    loggers: list[str] = []
+    streams: list[str] = []
+    fulltext_expression: str | None = None
+    time_range: TimeRange | None = None
+    use_parameterized_time_range: bool = False
+    filters: list[FilterCondition] = []
+    post_filters: list[FilterCondition] = []
+    selected_fields: list[str] = []
+    computed_fields: list[ComputedField] = []
+    renames: list[RenameOperation] = []
+    group_by: list[str] = []
+    aggregations: list[Aggregation] = []
+    aggregation_command: Literal["stats", "rollup"] = "stats"
+    final_aggregations: list[Aggregation] = []
+    sort: list[SortCondition] = []
+    limit: int | None = None
+    output_format: str | None = None
+    assumptions: list[str] = []
+    missing_information: list[str] = []
+
+
+class RequestContext(BaseModel):
+    product: str | None = None
+    version: str | None = None
+    known_tables: list[str] = []
+    known_fields: list[str] = []
+
+
+class GenerateQueryRequest(BaseModel):
+    request: str = Field(min_length=1, examples=["최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘"])
+    context: RequestContext = RequestContext()
+
+
+class ValidateQueryRequest(BaseModel):
+    query: str = Field(min_length=1, examples=["table duration=24h firewall_logs\n| stats count by src_ip"])

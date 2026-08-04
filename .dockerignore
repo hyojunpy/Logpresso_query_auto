@@ -1,0 +1,12 @@
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.log
+data
+logpresso_query_assistant.egg-info
+.git
+.env
