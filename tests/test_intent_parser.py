@@ -250,6 +250,15 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.renames[0].field, "src_ip")
         self.assertEqual(intent.renames[0].new_name, "할당ip")
 
+    def test_extracts_rename_request_with_euro_particle(self):
+        payload = GenerateQueryRequest(
+            request="firewall_logs의 src_ip를 할당ip으로 rename해줘",
+            context=RequestContext(known_tables=["firewall_logs"], known_fields=["src_ip", "_time"]),
+        )
+        intent = IntentParser().parse(payload)
+        self.assertEqual(len(intent.renames), 1)
+        self.assertEqual(intent.renames[0].new_name, "할당ip")
+
     def test_rename_needs_field_names_when_unknown(self):
         payload = GenerateQueryRequest(
             request="firewall_logs의 unknown_ip를 할당ip로 rename해줘",
@@ -287,6 +296,15 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(len(intent.computed_fields), 1)
         self.assertEqual(intent.computed_fields[0].name, "total")
         self.assertEqual(intent.computed_fields[0].expression, "kernel + user")
+
+    def test_extracts_computed_field_without_particle_suffix(self):
+        payload = GenerateQueryRequest(
+            request="sys_cpu_logs에서 kernel + user를 total으로 계산해줘",
+            context=RequestContext(known_tables=["sys_cpu_logs"], known_fields=["kernel", "user", "_time"]),
+        )
+        intent = IntentParser().parse(payload)
+        self.assertEqual(len(intent.computed_fields), 1)
+        self.assertEqual(intent.computed_fields[0].name, "total")
 
     def test_computed_field_needs_clarification_when_source_field_unknown(self):
         payload = GenerateQueryRequest(

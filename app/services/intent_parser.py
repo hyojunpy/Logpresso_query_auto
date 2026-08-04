@@ -684,8 +684,8 @@ class IntentParser:
         if not any(word in text.lower() for word in ("rename", "이름 변경", "이름변경", "필드명 변경")):
             return []
         patterns = [
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*)\s*(?:로|으로)\s*rename",
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*)\s*(?:로|으로)\s*(?:이름\s*변경|필드명\s*변경)",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*?)\s*(?:으로|로)\s*rename",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*?)\s*(?:으로|로)\s*(?:이름\s*변경|필드명\s*변경)",
             r"rename\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:as\s+)?([가-힣A-Za-z_][가-힣A-Za-z0-9_]*)",
         ]
         renames: list[RenameOperation] = []
@@ -727,8 +727,8 @@ class IntentParser:
         if not self._looks_like_computation(text):
             return []
         patterns = [
-            r"([A-Za-z_][A-Za-z0-9_]*(?:\s*[+\-*/]\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*(?:를|을)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:로|으로)\s*(?:계산|eval|생성|만들)",
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:와|과|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:의\s*)?(?:합계|합|더한\s*값)\s*(?:를|을)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:로|으로)?\s*(?:계산|생성|만들)?",
+            r"([A-Za-z_][A-Za-z0-9_]*(?:\s*[+\-*/]\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*(?:를|을)\s*([A-Za-z_][A-Za-z0-9_]*?)\s*(?:으로|로)\s*(?:계산|eval|생성|만들)",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:와|과|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:의\s*)?(?:합계|합|더한\s*값)\s*(?:를|을)?\s*([A-Za-z_][A-Za-z0-9_]*?)\s*(?:으로|로)?\s*(?:계산|생성|만들)?",
         ]
         computed = []
         for field_expr, target in re.findall(patterns[0], text, flags=re.IGNORECASE):

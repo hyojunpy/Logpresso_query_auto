@@ -394,6 +394,16 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertIn("rename", response.validation.commands)
         self.assertTrue(any(ref.entry_name == "rename" for ref in response.references))
 
+    def test_generates_rename_query_without_euro_particle_suffix(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip를 할당ip으로 rename해줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["src_ip", "_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table firewall_logs\n| rename src_ip as 할당ip")
+
     def test_rename_needs_clarification_when_source_field_unknown(self):
         response = generator().generate(
             GenerateQueryRequest(

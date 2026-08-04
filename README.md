@@ -247,7 +247,7 @@ pytest
 정상 기준:
 
 ```text
-218 passed, 1 skipped
+221 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.
