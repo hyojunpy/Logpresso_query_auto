@@ -101,38 +101,44 @@ if st.button("쿼리 생성", type="primary"):
     generate(request_text)
     st.rerun()
 
+response_slot = st.empty()
 response = st.session_state.get("response")
 if response:
-    needs_clarification = response.get("status") == "needs_clarification"
+    with response_slot.container():
+        needs_clarification = response.get("status") == "needs_clarification"
+        clarification_slot = st.empty()
 
-    if needs_clarification:
-        st.warning("추가 정보가 필요합니다.")
-        answer = st.text_area(
-            "확인 질문 답변",
-            key="clarification_answer",
-            placeholder="예: 테이블은 app_logs, 에러 필드는 message, 기간은 최근 24시간",
-        )
-        if st.button("답변을 반영해 다시 생성"):
-            combined = request_text + "\n추가 조건: " + answer
-            generate(combined, clear_answer=True)
-            st.rerun()
-
-    tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조화 요청", "디버그"])
-    with tabs[0]:
         if needs_clarification:
-            for question in response.get("questions", []):
-                st.write(f"- {question}")
-        elif response.get("query"):
-            st.code(response["query"], language="sql")
+            with clarification_slot.container():
+                st.warning("추가 정보가 필요합니다.")
+                answer = st.text_area(
+                    "확인 질문 답변",
+                    key="clarification_answer",
+                    placeholder="예: 테이블은 app_logs, 에러 필드는 message, 기간은 최근 24시간",
+                )
+                if st.button("답변을 반영해 다시 생성"):
+                    combined = request_text + "\n추가 조건: " + answer
+                    generate(combined, clear_answer=True)
+                    st.rerun()
         else:
-            st.error("쿼리를 생성하지 못했습니다.")
-    with tabs[1]:
-        st.json(response.get("explanation", []))
-    with tabs[2]:
-        st.json(response.get("validation", {}))
-    with tabs[3]:
-        st.json(response.get("references", []))
-    with tabs[4]:
-        st.json(response.get("intent", {}))
-    with tabs[5]:
-        st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
+            clarification_slot.empty()
+
+        tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조화 요청", "디버그"])
+        with tabs[0]:
+            if needs_clarification:
+                for question in response.get("questions", []):
+                    st.write(f"- {question}")
+            elif response.get("query"):
+                st.code(response["query"], language="sql")
+            else:
+                st.error("쿼리를 생성하지 못했습니다.")
+        with tabs[1]:
+            st.json(response.get("explanation", []))
+        with tabs[2]:
+            st.json(response.get("validation", {}))
+        with tabs[3]:
+            st.json(response.get("references", []))
+        with tabs[4]:
+            st.json(response.get("intent", {}))
+        with tabs[5]:
+            st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))

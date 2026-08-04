@@ -13,6 +13,7 @@
 - Mock, OpenAI, Ollama provider 인터페이스
 - 쿼리 생성, 검증, 문서 근거 표시
 - FastAPI Swagger와 Streamlit UI
+- Playwright 기반 Streamlit 실제 브라우저 회귀 테스트
 - 쿼리 자동 실행 없음
 
 현재 자연어 생성기는 다음 요청 유형을 지원합니다.
@@ -226,13 +227,27 @@ pytest
 정상 기준:
 
 ```text
-164 passed
+164 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.
 
 ```bash
 python -m unittest discover -s tests
+```
+
+실제 Chromium으로 확인 질문 UI 상태 전환을 검사하려면:
+
+```bash
+python -m playwright install chromium
+RUN_BROWSER_TESTS=1 python -m pytest tests/test_streamlit_browser.py -q
+```
+
+PowerShell:
+
+```powershell
+$env:RUN_BROWSER_TESTS="1"
+python -m pytest tests/test_streamlit_browser.py -q
 ```
 
 `requirements.lock`은 검증된 전체 의존성 버전을 고정합니다. 의존성을 변경할 때는 Python 3.12 가상환경에서 전체 테스트를 통과한 뒤 lock 파일도 함께 갱신하세요.
