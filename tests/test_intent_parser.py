@@ -6,6 +6,44 @@ from app.services.intent_parser import IntentParser
 
 
 class IntentParserTest(unittest.TestCase):
+    def test_extracts_named_parser(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="ssh_logs 테이블에 openssh 파서를 적용해줘",
+                context=RequestContext(known_tables=["ssh_logs"], known_fields=["line"]),
+            )
+        )
+        self.assertEqual(intent.parser_name, "openssh")
+        self.assertEqual(intent.missing_information, [])
+
+    def test_parse_request_needs_parser_name(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="ssh_logs 테이블의 line을 파싱해줘",
+                context=RequestContext(known_tables=["ssh_logs"], known_fields=["line"]),
+            )
+        )
+        self.assertIn("적용할 파서 이름", intent.missing_information)
+
+    def test_extracts_explode_array_field(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 tags 배열 필드를 행으로 확장해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["tags", "message"]),
+            )
+        )
+        self.assertEqual(intent.explode_fields, ["tags"])
+
+    def test_explode_request_needs_known_field(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 tags 배열 필드를 행으로 확장해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["message"]),
+            )
+        )
+        self.assertEqual(intent.explode_fields, [])
+        self.assertIn("행으로 확장할 배열 필드명", intent.missing_information)
+
     def test_extracts_logger_source(self):
         payload = GenerateQueryRequest(
             request=r"local\sample1, local\sample2 로그 수집기를 10초간 보여줘",

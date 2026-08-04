@@ -56,6 +56,8 @@ class QueryIntent(BaseModel):
     post_filters: list[FilterCondition] = []
     selected_fields: list[str] = []
     computed_fields: list[ComputedField] = []
+    parser_name: str | None = None
+    explode_fields: list[str] = []
     renames: list[RenameOperation] = []
     group_by: list[str] = []
     aggregations: list[Aggregation] = []

@@ -13,6 +13,49 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_generates_named_parse_query(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="ssh_logs 테이블에 openssh 파서를 적용해줘",
+                context=RequestContext(known_tables=["ssh_logs"], known_fields=["line"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table ssh_logs\n| parse openssh")
+        self.assertIn("parse", response.validation.commands)
+
+    def test_parse_query_needs_parser_name(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="ssh_logs 테이블의 line을 파싱해줘",
+                context=RequestContext(known_tables=["ssh_logs"], known_fields=["line"]),
+            )
+        )
+        self.assertEqual(response.status, "needs_clarification")
+        self.assertTrue(any("파서 이름" in question for question in response.questions))
+
+    def test_generates_explode_query(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 tags 배열 필드를 행으로 확장해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["tags", "message"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table app_logs\n| explode tags")
+        self.assertIn("explode", response.validation.commands)
+
+    def test_maps_where_wording_to_documented_search_command(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs 테이블에서 where 조건으로 action=deny인 로그 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["action"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, 'table firewall_logs\n| search action == "deny"')
+        self.assertNotIn("where", response.validation.commands)
+
     def test_generates_logger_query(self):
         response = generator().generate(
             GenerateQueryRequest(

@@ -27,6 +27,8 @@
 - `fulltext`의 `and`/`or`, `range()`, `iprange()` 자연어 표현식
 - `logger window=... NAMESPACE\\LOGGER` 실시간 로그 수집기 조회
 - `.evtx`, `.eml`, `.lnk` 파일 경로 기반 문서 명령 생성
+- 이름 지정 `parse` 파서 적용과 배열 필드 `explode`
+- 자연어의 where 조건은 문서 기반 `search` 명령으로 변환
 - `set`과 `$()`를 이용한 동적 기간 매개변수 예제
 
 ## 설치
@@ -224,7 +226,7 @@ pytest
 정상 기준:
 
 ```text
-155 passed
+164 passed
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.

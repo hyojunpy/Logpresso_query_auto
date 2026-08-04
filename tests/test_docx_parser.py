@@ -13,6 +13,9 @@ class DocxParserTest(unittest.TestCase):
         self.assertIn("evtx-file", names)
         self.assertIn("eml-file", names)
         self.assertIn("lnk-file", names)
+        self.assertIn("parse", names)
+        self.assertIn("explode", names)
+        self.assertNotIn("where", names)
 
     def test_extracts_option_and_function_metadata(self):
         chunks = DocxParser().parse(Path("docs") / "로그프레소 쿼리.docx")

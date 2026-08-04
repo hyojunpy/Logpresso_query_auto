@@ -25,7 +25,7 @@ class QueryGenerator:
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         intent = self.intent_parser.parse(payload)
-        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file search stats rollup timechart eval fields rename first last set setq"
+        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file search parse explode stats rollup timechart eval fields rename first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:
             return GenerateQueryResponse(
@@ -122,9 +122,13 @@ class QueryGenerator:
             first += f" from={intent.time_range.from_} to={intent.time_range.to}"
         first += f" {table}"
         lines = [first]
+        if intent.parser_name:
+            lines.append(f"| parse {intent.parser_name}")
         lines.extend(self._filter_lines(intent))
         for computed in intent.computed_fields:
             lines.append(f"| eval {computed.name} = {computed.expression}")
+        for field in intent.explode_fields:
+            lines.append(f"| explode {field}")
         for rename in intent.renames:
             lines.append(f"| rename {rename.field} as {rename.new_name}")
         if intent.selected_fields:
@@ -152,14 +156,20 @@ class QueryGenerator:
         if not intent.loggers or not intent.logger_window:
             raise ValueError("logger name and window are required to generate a logger query")
         lines = [f"logger window={intent.logger_window} {', '.join(intent.loggers)}"]
+        if intent.parser_name:
+            lines.append(f"| parse {intent.parser_name}")
         lines.extend(self._filter_lines(intent))
+        lines.extend(f"| explode {field}" for field in intent.explode_fields)
         return "\n".join(lines)
 
     def _file_query(self, intent: QueryIntent) -> str:
         if not intent.file_command or not intent.file_path:
             raise ValueError("documented file command and path are required to generate a file query")
         lines = [f"{intent.file_command} {intent.file_path}"]
+        if intent.parser_name:
+            lines.append(f"| parse {intent.parser_name}")
         lines.extend(self._filter_lines(intent))
+        lines.extend(f"| explode {field}" for field in intent.explode_fields)
         return "\n".join(lines)
 
     def _parameterized_table_query(self, intent: QueryIntent) -> str:
@@ -258,6 +268,8 @@ class QueryGenerator:
             "조회할 파일 경로": "조회할 파일의 전체 경로는 무엇인가요?",
             "파일 형식에 맞는 명령": "파일 형식을 확인할 수 없습니다. 지원할 파일 종류와 경로를 알려주세요.",
             "공백 없는 파일 경로": "문서에서 공백 포함 경로의 인용 문법을 확인하지 못했습니다. 공백이 없는 경로를 알려주세요.",
+            "적용할 파서 이름": "적용할 로그프레소 파서 이름은 무엇인가요? 예: openssh",
+            "행으로 확장할 배열 필드명": "배열 원소마다 행으로 확장할 필드명은 무엇인가요? 예: tags",
             "필터에 사용할 필드명과 값": "필터에 사용할 필드명과 값은 무엇인가요?",
             "비교 조건에 사용할 필드명과 값": "비교 조건에 사용할 필드명과 값은 무엇인가요? 예: kernel + user가 80 이상",
             "IP 집계에 사용할 필드명": "IP 집계에 사용할 필드명은 무엇인가요? 예: src_ip",
@@ -373,6 +385,10 @@ class QueryGenerator:
                 explanations.append(QueryExplanation(query_part=line, reason="사용자 요청에서 추출한 필터 조건을 적용합니다."))
             elif line.startswith("| eval"):
                 explanations.append(QueryExplanation(query_part=line, reason="요청한 계산식을 새 필드로 생성합니다."))
+            elif line.startswith("| parse"):
+                explanations.append(QueryExplanation(query_part=line, reason="문서에 정의된 parse 명령으로 지정한 파서를 적용합니다."))
+            elif line.startswith("| explode"):
+                explanations.append(QueryExplanation(query_part=line, reason="배열 필드의 각 원소를 개별 행으로 확장합니다."))
             elif line.startswith("| rename"):
                 explanations.append(QueryExplanation(query_part=line, reason="요청한 원본 필드명을 새 표시 필드명으로 변경합니다."))
             elif line.startswith("| fields"):

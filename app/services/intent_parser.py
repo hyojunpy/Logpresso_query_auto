@@ -58,6 +58,8 @@ class IntentParser:
             intent.file_command = self._file_command(intent.file_path)
         intent.selected_fields = self._selected_fields(text, context.known_fields)
         intent.computed_fields = self._computed_fields(text, context.known_fields)
+        intent.parser_name = self._parser_name(text)
+        intent.explode_fields = self._explode_fields(text, context.known_fields)
         intent.renames = self._renames(text, context.known_fields)
         intent.aggregations = self._aggregations(text, context.known_fields)
         intent.group_by = self._group_by(text, context.known_fields)
@@ -330,6 +332,29 @@ class IntentParser:
     def _streams(self, text: str) -> list[str]:
         return re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*스트림", text)
 
+    def _parser_name(self, text: str) -> str | None:
+        explicit = re.search(r"\bparse\s+([A-Za-z_][A-Za-z0-9_.-]*)\b", text, flags=re.IGNORECASE)
+        if explicit:
+            return explicit.group(1)
+        patterns = [
+            r"\b([A-Za-z_][A-Za-z0-9_.-]*)\s*파서(?:로|를\s*사용(?:해서|하여)?|를\s*적용)",
+            r"\b([A-Za-z_][A-Za-z0-9_.-]*)\s*parser(?:로|를\s*사용(?:해서|하여)?)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    def _explode_fields(self, text: str, known_fields: list[str]) -> list[str]:
+        explicit = re.findall(r"\bexplode\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, flags=re.IGNORECASE)
+        fields = [field for field in explicit if not known_fields or field in known_fields]
+        if any(word in text.lower() for word in ("explode", "배열", "펼쳐", "행으로", "원소별")):
+            for field in known_fields:
+                if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", text) and field not in fields:
+                    fields.append(field)
+        return fields
+
     def _loggers(self, text: str) -> list[str]:
         return list(dict.fromkeys(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*\\[A-Za-z_][A-Za-z0-9_*.-]*)\b", text)))
 
@@ -452,16 +477,18 @@ class IntentParser:
             return []
         field = r"[A-Za-z_][A-Za-z0-9_]*"
         value = r"[가-힣A-Za-z0-9_.:/-]+"
+        symbolic_value = r"[가-힣A-Za-z0-9_.:/-]+?"
+        symbolic_boundary = r"(?=\s|(?:인|아닌)(?:\s|$)|[,.)]|$)"
         filters: list[FilterCondition] = []
         negative_patterns = [
             rf"({field})\s*(?:가|이|은|는)?\s*({value}?)\s*(?:이\s*)?아닌",
-            rf"({field})\s*!=\s*({value})",
+            rf"({field})\s*!=\s*({symbolic_value}){symbolic_boundary}",
         ]
         positive_patterns = [
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*인(?!\s*아닌)",
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*(?:이거나|거나)",
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*(?:같은|와\s*같은|과\s*같은)",
-            rf"({field})\s*(?:==|=)\s*({value})",
+            rf"({field})\s*(?:==|=)\s*({symbolic_value}){symbolic_boundary}",
         ]
         for left, first, second in re.findall(
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*(?:또는|혹은|or)\s*({value}?)\s*인",
@@ -831,6 +858,10 @@ class IntentParser:
             intent.missing_information.append("출력할 필드명")
         if self._looks_like_computation(text) and not intent.computed_fields and not intent.aggregations:
             intent.missing_information.append("계산할 표현식과 새 필드명")
+        if self._looks_like_parse(text) and not intent.parser_name:
+            intent.missing_information.append("적용할 파서 이름")
+        if self._looks_like_explode(text) and not intent.explode_fields:
+            intent.missing_information.append("행으로 확장할 배열 필드명")
         if self._looks_like_metric_aggregation(text) and not intent.aggregations:
             intent.missing_information.append("집계할 필드명")
         if intent.use_parameterized_time_range and not intent.time_range:
@@ -857,6 +888,12 @@ class IntentParser:
 
     def _looks_like_comparison(self, text: str) -> bool:
         return any(word in text for word in ("이상", "초과", "이하", "미만", ">=", "<=", ">", "<"))
+
+    def _looks_like_parse(self, text: str) -> bool:
+        return bool(re.search(r"\bparse\b", text, flags=re.IGNORECASE) or any(word in text for word in ("파서", "파싱")))
+
+    def _looks_like_explode(self, text: str) -> bool:
+        return any(word in text.lower() for word in ("explode", "배열을 펼", "배열 필드", "행으로 확장", "원소별 행"))
 
     def _looks_like_string_filter(self, text: str) -> bool:
         return bool(

@@ -6,6 +6,11 @@ from tests.support import shared_index
 
 
 class QueryValidatorTest(unittest.TestCase):
+    def test_rejects_where_as_pipeline_command(self):
+        result = self.validator.validate('table firewall_logs | where action == "deny"')
+        self.assertFalse(result.valid)
+        self.assertTrue(any(issue.code == "unknown_command" for issue in result.errors))
+
     def setUp(self):
         self.validator = QueryValidator(Retriever(shared_index()))
 
