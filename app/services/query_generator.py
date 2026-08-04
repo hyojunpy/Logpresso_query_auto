@@ -25,7 +25,7 @@ class QueryGenerator:
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         intent = self.intent_parser.parse(payload)
-        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file csvfile jsonfile textfile search parse explode stats rollup timechart eval fields rename first last set setq"
+        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file csvfile jsonfile textfile search parse parsejson parsecsv explode stats rollup timechart eval fields rename first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:
             return GenerateQueryResponse(
@@ -126,6 +126,7 @@ class QueryGenerator:
         lines = [first]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
+        lines.extend(self._structured_parser_lines(intent))
         lines.extend(self._filter_lines(intent))
         for computed in intent.computed_fields:
             lines.append(f"| eval {computed.name} = {computed.expression}")
@@ -160,6 +161,7 @@ class QueryGenerator:
         lines = [f"logger window={intent.logger_window} {', '.join(intent.loggers)}"]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
+        lines.extend(self._structured_parser_lines(intent))
         lines.extend(self._filter_lines(intent))
         lines.extend(f"| explode {field}" for field in intent.explode_fields)
         return "\n".join(lines)
@@ -173,6 +175,7 @@ class QueryGenerator:
         lines = [f"{command} {', '.join(intent.streams)}"]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
+        lines.extend(self._structured_parser_lines(intent))
         lines.extend(self._filter_lines(intent))
         lines.extend(f"| explode {field}" for field in intent.explode_fields)
         return "\n".join(lines)
@@ -183,9 +186,24 @@ class QueryGenerator:
         lines = [f"{intent.file_command} {intent.file_path}"]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
+        lines.extend(self._structured_parser_lines(intent))
         lines.extend(self._filter_lines(intent))
         lines.extend(f"| explode {field}" for field in intent.explode_fields)
         return "\n".join(lines)
+
+    def _structured_parser_lines(self, intent: QueryIntent) -> list[str]:
+        if not intent.structured_parser:
+            return []
+        command = intent.structured_parser
+        options: list[str] = []
+        if intent.structured_parser_field:
+            options.append(f"field={intent.structured_parser_field}")
+        if intent.parser_flatten:
+            options.append("flatten=t")
+        if intent.parser_tab:
+            options.append("tab=t")
+        suffix = f" {' '.join(options)}" if options else ""
+        return [f"| {command}{suffix}"]
 
     def _parameterized_table_query(self, intent: QueryIntent) -> str:
         if not intent.tables:
@@ -403,7 +421,7 @@ class QueryGenerator:
             elif line.startswith("| eval"):
                 explanations.append(QueryExplanation(query_part=line, reason="요청한 계산식을 새 필드로 생성합니다."))
             elif line.startswith("| parse"):
-                explanations.append(QueryExplanation(query_part=line, reason="문서에 정의된 parse 명령으로 지정한 파서를 적용합니다."))
+                explanations.append(QueryExplanation(query_part=line, reason="문서에 정의된 파싱 명령으로 문자열을 구조화된 필드로 변환합니다."))
             elif line.startswith("| explode"):
                 explanations.append(QueryExplanation(query_part=line, reason="배열 필드의 각 원소를 개별 행으로 확장합니다."))
             elif line.startswith("| rename"):

@@ -16,6 +16,29 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.parser_name, "openssh")
         self.assertEqual(intent.missing_information, [])
 
+    def test_extracts_json_parser_options(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 payload 필드 JSON 중첩을 펼쳐 파싱해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["payload"]),
+            )
+        )
+        self.assertEqual(intent.structured_parser, "parsejson")
+        self.assertEqual(intent.structured_parser_field, "payload")
+        self.assertTrue(intent.parser_flatten)
+        self.assertNotIn("적용할 파서 이름", intent.missing_information)
+
+    def test_extracts_tsv_parser_options(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 line 필드 TSV 문자열을 파싱해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["line"]),
+            )
+        )
+        self.assertEqual(intent.structured_parser, "parsecsv")
+        self.assertEqual(intent.structured_parser_field, "line")
+        self.assertTrue(intent.parser_tab)
+
     def test_parse_request_needs_parser_name(self):
         intent = IntentParser().parse(
             GenerateQueryRequest(

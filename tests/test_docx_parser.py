@@ -16,6 +16,8 @@ class DocxParserTest(unittest.TestCase):
         self.assertIn("csvfile", names)
         self.assertIn("jsonfile", names)
         self.assertIn("textfile", names)
+        self.assertIn("parsejson", names)
+        self.assertIn("parsecsv", names)
         self.assertIn("parse", names)
         self.assertIn("explode", names)
         self.assertNotIn("where", names)

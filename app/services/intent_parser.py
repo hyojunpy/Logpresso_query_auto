@@ -60,6 +60,14 @@ class IntentParser:
         intent.selected_fields = self._selected_fields(text, context.known_fields)
         intent.computed_fields = self._computed_fields(text, context.known_fields)
         intent.parser_name = self._parser_name(text)
+        intent.structured_parser = self._structured_parser(text)
+        intent.structured_parser_field = self._structured_parser_field(text) if intent.structured_parser else None
+        intent.parser_flatten = intent.structured_parser == "parsejson" and any(
+            word in text.lower() for word in ("flatten", "중첩을 펼", "중첩까지 펼", "배열을 펼")
+        )
+        intent.parser_tab = intent.structured_parser == "parsecsv" and any(
+            word in text.lower() for word in ("tsv", "tab=t", "탭 구분")
+        )
         intent.explode_fields = self._explode_fields(text, context.known_fields)
         intent.renames = self._renames(text, context.known_fields)
         intent.aggregations = self._aggregations(text, context.known_fields)
@@ -351,10 +359,31 @@ class IntentParser:
                 return match.group(1)
         return None
 
+    def _structured_parser(self, text: str) -> str | None:
+        lowered = text.lower()
+        if not self._looks_like_parse(text):
+            return None
+        if "parsejson" in lowered or "json" in lowered:
+            return "parsejson"
+        if "parsecsv" in lowered or "csv" in lowered or "tsv" in lowered:
+            return "parsecsv"
+        return None
+
+    def _structured_parser_field(self, text: str) -> str | None:
+        explicit = re.search(r"\bfield\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b", text, flags=re.IGNORECASE)
+        if explicit:
+            return explicit.group(1)
+        match = re.search(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*필드(?:에\s*저장된|의)?\s*(?:JSON|CSV|TSV)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return match.group(1) if match else None
+
     def _explode_fields(self, text: str, known_fields: list[str]) -> list[str]:
         explicit = re.findall(r"\bexplode\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, flags=re.IGNORECASE)
         fields = [field for field in explicit if not known_fields or field in known_fields]
-        if any(word in text.lower() for word in ("explode", "배열", "펼쳐", "행으로", "원소별")):
+        if any(word in text.lower() for word in ("explode", "배열", "행으로", "원소별")):
             for field in known_fields:
                 if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", text) and field not in fields:
                     fields.append(field)
@@ -872,7 +901,7 @@ class IntentParser:
             intent.missing_information.append("출력할 필드명")
         if self._looks_like_computation(text) and not intent.computed_fields and not intent.aggregations:
             intent.missing_information.append("계산할 표현식과 새 필드명")
-        if self._looks_like_parse(text) and not intent.parser_name:
+        if self._looks_like_parse(text) and not intent.parser_name and not intent.structured_parser:
             intent.missing_information.append("적용할 파서 이름")
         if self._looks_like_explode(text) and not intent.explode_fields:
             intent.missing_information.append("행으로 확장할 배열 필드명")

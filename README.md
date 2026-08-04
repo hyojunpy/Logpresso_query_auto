@@ -30,6 +30,7 @@
 - `stream [window=...] STREAM[, ...]` 실시간 스트림 수신(와일드카드 지원)
 - `.evtx`, `.eml`, `.lnk`, `.csv`, `.tsv`, `.json`, `.txt` 파일 경로 기반 문서 명령 생성
 - 이름 지정 `parse` 파서 적용과 배열 필드 `explode`
+- `parsejson`, `parsecsv` 기반 JSON/CSV/TSV 문자열 구조화 파싱
 - 자연어의 where 조건은 문서 기반 `search` 명령으로 변환
 - `set`과 `$()`를 이용한 동적 기간 매개변수 예제
 
@@ -228,7 +229,7 @@ pytest
 정상 기준:
 
 ```text
-170 passed, 1 skipped
+174 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.

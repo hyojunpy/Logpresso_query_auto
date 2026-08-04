@@ -58,6 +58,10 @@ class QueryIntent(BaseModel):
     selected_fields: list[str] = []
     computed_fields: list[ComputedField] = []
     parser_name: str | None = None
+    structured_parser: Literal["parsejson", "parsecsv"] | None = None
+    structured_parser_field: str | None = None
+    parser_flatten: bool = False
+    parser_tab: bool = False
     explode_fields: list[str] = []
     renames: list[RenameOperation] = []
     group_by: list[str] = []

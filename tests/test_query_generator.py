@@ -24,6 +24,28 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.query, "table ssh_logs\n| parse openssh")
         self.assertIn("parse", response.validation.commands)
 
+    def test_generates_parsejson_query(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 payload 필드 JSON 중첩을 펼쳐 파싱해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["payload"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table app_logs\n| parsejson field=payload flatten=t")
+        self.assertIn("parsejson", response.validation.commands)
+
+    def test_generates_parsecsv_tsv_query(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="app_logs 테이블의 line 필드 TSV 문자열을 파싱해줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["line"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table app_logs\n| parsecsv field=line tab=t")
+        self.assertIn("parsecsv", response.validation.commands)
+
     def test_parse_query_needs_parser_name(self):
         response = generator().generate(
             GenerateQueryRequest(
