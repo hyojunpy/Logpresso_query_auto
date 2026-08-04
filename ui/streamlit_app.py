@@ -40,6 +40,10 @@ examples = [
     "araqne_query_logs에서 root 사용자의 실행 건수를 10분 단위로 보여줘",
     "firewall_logs의 src_ip를 할당ip로 rename해줘",
     "firewall_logs에서 src_ip, action만 보여줘",
+    "sample1, sample2 스트림을 10초간 level=error 조건으로 보여줘",
+    "/opt/logpresso/events.json 파일을 조회해줘",
+    "/opt/logpresso/testdata.zip 안의 *.txt 파일을 조회해줘",
+    "firewall_logs 테이블의 message 필드 JSON 중첩을 펼쳐 파싱해줘",
     "에러 로그 보여줘",
 ]
 selected = st.selectbox("예제 요청", [""] + examples)
@@ -116,8 +120,8 @@ if response:
                     key="clarification_answer",
                     placeholder="예: 테이블은 app_logs, 에러 필드는 message, 기간은 최근 24시간",
                 )
-                if st.button("답변을 반영해 다시 생성"):
-                    combined = request_text + "\n추가 조건: " + answer
+                if st.button("답변을 반영해 다시 생성", disabled=not answer.strip()):
+                    combined = request_text + "\n추가 조건: " + answer.strip()
                     generate(combined, clear_answer=True)
                     st.rerun()
         else:
@@ -129,7 +133,15 @@ if response:
                 for question in response.get("questions", []):
                     st.write(f"- {question}")
             elif response.get("query"):
-                st.code(response["query"], language="sql")
+                query = response["query"]
+                st.code(query, language="sql")
+                st.caption("코드 영역 오른쪽 위의 복사 아이콘으로 쿼리를 복사할 수 있습니다.")
+                st.download_button(
+                    "쿼리 파일 다운로드",
+                    data=query,
+                    file_name="logpresso_query.txt",
+                    mime="text/plain",
+                )
             else:
                 st.error("쿼리를 생성하지 못했습니다.")
         with tabs[1]:

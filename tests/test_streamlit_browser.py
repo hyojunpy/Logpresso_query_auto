@@ -78,4 +78,6 @@ class StreamlitBrowserTest(unittest.TestCase):
             expect(page.get_by_label("확인 질문 답변", exact=True)).not_to_be_visible()
             expect(page.get_by_text("조회할 로그프레소 테이블 이름은 무엇인가요?", exact=True)).not_to_be_visible()
             expect(page.locator("code").filter(has_text='search action == "deny"')).to_be_visible()
+            expect(page.get_by_role("button", name="쿼리 파일 다운로드", exact=True)).to_be_visible()
+            expect(page.get_by_text("코드 영역 오른쪽 위의 복사 아이콘으로 쿼리를 복사할 수 있습니다.")).to_be_visible()
             browser.close()
