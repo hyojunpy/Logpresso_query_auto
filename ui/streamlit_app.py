@@ -94,6 +94,44 @@ def generate(text: str, *, clear_answer: bool = True, display_text: str | None =
         clear_clarification_state()
 
 
+def render_validation(validation: dict) -> None:
+    if validation.get("valid"):
+        st.success("문법 검증을 통과했습니다.")
+    else:
+        st.error("문법 검증 오류가 있습니다.")
+    commands = validation.get("commands", [])
+    functions = validation.get("functions", [])
+    if commands:
+        st.write("사용 명령: " + ", ".join(f"`{command}`" for command in commands))
+    if functions:
+        st.write("사용 함수: " + ", ".join(f"`{function}`" for function in functions))
+    for issue in validation.get("errors", []):
+        st.error(f"{issue.get('message', '검증 오류')} ({issue.get('code', 'unknown')})")
+        if issue.get("evidence"):
+            st.code(issue["evidence"])
+    for issue in validation.get("warnings", []):
+        st.warning(f"{issue.get('message', '검증 경고')} ({issue.get('code', 'unknown')})")
+
+
+def render_references(references: list[dict]) -> None:
+    if not references:
+        st.info("표시할 문서 근거가 없습니다.")
+        return
+    st.caption(f"생성 쿼리에 사용된 문서 근거 {len(references)}건")
+    for index, reference in enumerate(references, start=1):
+        entry = reference.get("entry_name") or "문서 항목"
+        section = reference.get("section") or "구간 정보 없음"
+        with st.expander(f"{index}. {entry} · {section}"):
+            if reference.get("reason"):
+                st.write(reference["reason"])
+            if reference.get("excerpt"):
+                st.code(reference["excerpt"], language=None)
+            if reference.get("options"):
+                st.write("문서 옵션: " + ", ".join(f"`{item}`" for item in reference["options"]))
+            if reference.get("functions"):
+                st.write("문서 함수: " + ", ".join(f"`{item}`" for item in reference["functions"]))
+
+
 current_fingerprint = request_fingerprint(request_text, current_context())
 if (
     "response_fingerprint" in st.session_state
@@ -153,9 +191,9 @@ if response:
         with tabs[1]:
             st.json(response.get("explanation", []))
         with tabs[2]:
-            st.json(response.get("validation", {}))
+            render_validation(response.get("validation") or {})
         with tabs[3]:
-            st.json(response.get("references", []))
+            render_references(response.get("references", []))
         with tabs[4]:
             st.json(response.get("intent", {}))
         with tabs[5]:

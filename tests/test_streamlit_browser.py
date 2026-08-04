@@ -83,4 +83,10 @@ class StreamlitBrowserTest(unittest.TestCase):
             expect(page.locator("code").filter(has_text='search message == "ERROR"')).to_be_visible()
             expect(page.get_by_role("button", name="쿼리 파일 다운로드", exact=True)).to_be_visible()
             expect(page.get_by_text("코드 영역 오른쪽 위의 복사 아이콘으로 쿼리를 복사할 수 있습니다.")).to_be_visible()
+
+            page.get_by_role("tab", name="검증", exact=True).click()
+            expect(page.get_by_text("문법 검증을 통과했습니다.", exact=True)).to_be_visible()
+            page.get_by_role("tab", name="문서 근거", exact=True).click()
+            expect(page.get_by_text("생성 쿼리에 사용된 문서 근거", exact=False)).to_be_visible()
+            expect(page.locator("details").first).to_be_visible()
             browser.close()
