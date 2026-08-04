@@ -20,6 +20,7 @@ class Settings:
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     ollama_timeout_seconds: float = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
+    log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     cors_allowed_origins: tuple[str, ...] = tuple(
         origin.strip()
         for origin in os.getenv(

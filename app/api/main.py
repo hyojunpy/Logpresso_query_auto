@@ -1,8 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from time import perf_counter
+from uuid import uuid4
 
 from app.api.routes import documents, generate, health
 from app.core.config import settings
+from app.core.logging import configure_request_logging
+
+
+logger = configure_request_logging(settings.log_level)
 
 
 def create_app() -> FastAPI:
@@ -27,6 +33,37 @@ def create_app() -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        return response
+
+    @app.middleware("http")
+    async def log_request(request, call_next):
+        request_id = uuid4().hex
+        started = perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception(
+                "request_failed",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "duration_ms": round((perf_counter() - started) * 1000, 2),
+                },
+            )
+            raise
+        duration_ms = round((perf_counter() - started) * 1000, 2)
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "request_completed",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
         return response
 
     app.include_router(health.router, prefix="/api/v1")

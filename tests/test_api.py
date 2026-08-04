@@ -1,9 +1,15 @@
 import importlib.util
+import json
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
+from uuid import UUID
 
 from docx import Document
+
+from app.core.logging import JsonFormatter
 
 
 def write_docx(path: Path, body: str) -> None:
@@ -36,6 +42,48 @@ class ApiTest(unittest.TestCase):
             response.headers["permissions-policy"],
             "camera=(), microphone=(), geolocation=()",
         )
+
+    def test_api_response_includes_unique_request_id(self):
+        first = self.client.get("/api/v1/health").headers["x-request-id"]
+        second = self.client.get("/api/v1/health").headers["x-request-id"]
+        self.assertEqual(UUID(first).hex, first)
+        self.assertEqual(UUID(second).hex, second)
+        self.assertNotEqual(first, second)
+
+    def test_request_log_contains_metadata_but_not_query_or_body(self):
+        secret_request = "sensitive natural language request"
+        with patch("app.api.main.logger.info") as log:
+            response = self.client.post(
+                "/api/v1/query/generate?debug=private-query-value",
+                json={"request": secret_request, "context": {}},
+            )
+        self.assertIn(response.status_code, (200, 422))
+        metadata = log.call_args.kwargs["extra"]
+        self.assertEqual(metadata["method"], "POST")
+        self.assertEqual(metadata["path"], "/api/v1/query/generate")
+        self.assertNotIn(secret_request, str(metadata))
+        self.assertNotIn("private-query-value", str(metadata))
+
+    def test_request_log_formatter_emits_structured_json(self):
+        record = logging.LogRecord(
+            name="logpresso.request",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="request_completed",
+            args=(),
+            exc_info=None,
+        )
+        record.request_id = "abc123"
+        record.method = "GET"
+        record.path = "/api/v1/health"
+        record.status_code = 200
+        record.duration_ms = 1.25
+        payload = json.loads(JsonFormatter().format(record))
+        self.assertEqual(payload["event"], "request_completed")
+        self.assertEqual(payload["request_id"], "abc123")
+        self.assertEqual(payload["status_code"], 200)
+        self.assertNotIn("pathname", payload)
 
     def test_cors_allows_configured_streamlit_origin(self):
         response = self.client.options(
