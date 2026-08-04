@@ -79,16 +79,17 @@ def clear_result_state() -> None:
     st.session_state.pop("response_fingerprint", None)
 
 
-def generate(text: str, *, clear_answer: bool = True) -> None:
+def generate(text: str, *, clear_answer: bool = True, display_text: str | None = None) -> None:
     if clear_answer:
         clear_clarification_state()
     context = current_context()
     payload = GenerateQueryRequest(request=text, context=context)
     generator = QueryGenerator(Retriever(index))
     response = generator.generate(payload)
-    st.session_state["request_text"] = text
+    visible_request = display_text if display_text is not None else text
+    st.session_state["request_text"] = visible_request
     st.session_state["response"] = response.model_dump()
-    st.session_state["response_fingerprint"] = request_fingerprint(text, context)
+    st.session_state["response_fingerprint"] = request_fingerprint(visible_request, context)
     if response.status != "needs_clarification":
         clear_clarification_state()
 
@@ -115,23 +116,28 @@ if response:
         if needs_clarification:
             with clarification_slot.container():
                 st.warning("추가 정보가 필요합니다.")
+                st.markdown("**확인할 내용**")
+                for question in response.get("questions", []):
+                    st.write(f"- {question}")
                 answer = st.text_area(
                     "확인 질문 답변",
                     key="clarification_answer",
                     placeholder="예: 테이블은 app_logs, 에러 필드는 message, 기간은 최근 24시간",
                 )
-                if st.button("답변을 반영해 다시 생성", disabled=not answer.strip()):
-                    combined = request_text + "\n추가 조건: " + answer.strip()
-                    generate(combined, clear_answer=True)
-                    st.rerun()
+                if st.button("답변을 반영해 다시 생성"):
+                    if not answer.strip():
+                        st.warning("확인 질문에 대한 답변을 입력해주세요.")
+                    else:
+                        combined = request_text + "\n추가 조건: " + answer.strip()
+                        generate(combined, clear_answer=True, display_text=request_text)
+                        st.rerun()
         else:
             clarification_slot.empty()
 
         tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조화 요청", "디버그"])
         with tabs[0]:
             if needs_clarification:
-                for question in response.get("questions", []):
-                    st.write(f"- {question}")
+                st.info("위 확인 질문에 답변하면 쿼리를 다시 생성합니다.")
             elif response.get("query"):
                 query = response["query"]
                 st.code(query, language="sql")

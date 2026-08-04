@@ -182,6 +182,19 @@ class IntentParserTest(unittest.TestCase):
         self.assertIn("조회할 로그프레소 테이블 이름", intent.missing_information)
         self.assertIn("필터에 사용할 필드명과 값", intent.missing_information)
 
+    def test_explicit_error_field_overrides_default_field_priority(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="에러 로그 보여줘. 테이블은 firewall_logs, 에러 필드는 message, 기간은 최근 24시간",
+                context=RequestContext(
+                    known_tables=["firewall_logs"],
+                    known_fields=["message", "level", "_time"],
+                ),
+            )
+        )
+        self.assertEqual(intent.filters[0].field, "message")
+        self.assertEqual(intent.filters[0].value, "ERROR")
+
     def test_does_not_invent_unknown_field(self):
         payload = GenerateQueryRequest(
             request="최근 1시간 동안 app_logs에서 에러 로그 보여줘",

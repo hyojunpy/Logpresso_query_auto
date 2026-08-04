@@ -14,6 +14,7 @@
 - 쿼리 생성, 검증, 문서 근거 표시
 - FastAPI Swagger와 Streamlit UI
 - Streamlit 생성 쿼리 복사 안내와 텍스트 파일 다운로드
+- 확인 질문 답변을 원 요청에 결합하는 Streamlit 대화 흐름
 - Playwright 기반 Streamlit 실제 브라우저 회귀 테스트
 - 쿼리 자동 실행 없음
 
@@ -231,7 +232,7 @@ pytest
 정상 기준:
 
 ```text
-181 passed, 1 skipped
+183 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.

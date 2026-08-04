@@ -454,11 +454,13 @@ class IntentParser:
             if field:
                 filters.append(FilterCondition(field=field, value="root"))
         if not has_explicit_string_filter and any(word in text for word in DENY_WORDS):
-            field = self._field_or_missing(known_fields, "action")
+            field = self._labeled_filter_field(text, ("차단", "deny", "blocked"), known_fields)
+            field = field or self._field_or_missing(known_fields, "action")
             if field:
                 filters.append(FilterCondition(field=field, value="deny"))
         if not has_explicit_string_filter and any(word in text for word in ERROR_WORDS):
-            field = self._field_or_missing(known_fields, "level", "severity", "message", "line")
+            field = self._labeled_filter_field(text, ERROR_WORDS, known_fields)
+            field = field or self._field_or_missing(known_fields, "level", "severity", "message", "line")
             if field:
                 value = "ERROR" if field in {"message", "line"} else "error"
                 filters.append(FilterCondition(field=field, value=value))
@@ -471,6 +473,23 @@ class IntentParser:
         filters.extend(self._string_comparison_filters(text, known_fields))
         filters.extend(self._contains_filters(text, known_fields))
         return self._without_post_filters(self._unique_filters(filters), post_filters or [])
+
+    def _labeled_filter_field(
+        self,
+        text: str,
+        labels: tuple[str, ...],
+        known_fields: list[str],
+    ) -> str | None:
+        label_pattern = "|".join(re.escape(label) for label in labels)
+        match = re.search(
+            rf"(?:{label_pattern})\s*필드(?:는|은|로|:)?\s*([A-Za-z_][A-Za-z0-9_]*)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        field = match.group(1)
+        return field if not known_fields or field in known_fields else None
 
     def _comparison_filters(self, text: str, known_fields: list[str]) -> list[FilterCondition]:
         operator_map = {

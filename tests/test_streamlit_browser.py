@@ -69,15 +69,18 @@ class StreamlitBrowserTest(unittest.TestCase):
             generate.click()
             expect(page.get_by_text("추가 정보가 필요합니다.", exact=True)).to_be_visible()
             expect(page.get_by_label("확인 질문 답변", exact=True)).to_be_visible()
+            expect(page.get_by_text("조회할 로그프레소 테이블 이름은 무엇인가요?", exact=True)).to_be_visible()
 
-            request.fill("최근 24시간 동안 firewall_logs에서 action=deny인 로그 보여줘")
-            request.press("Control+Enter")
-            generate.click()
+            page.get_by_label("확인 질문 답변", exact=True).fill(
+                "테이블은 firewall_logs, 에러 필드는 message, 기간은 최근 24시간"
+            )
+            page.get_by_role("button", name="답변을 반영해 다시 생성", exact=True).click()
 
             expect(page.get_by_text("추가 정보가 필요합니다.", exact=True)).not_to_be_visible()
             expect(page.get_by_label("확인 질문 답변", exact=True)).not_to_be_visible()
             expect(page.get_by_text("조회할 로그프레소 테이블 이름은 무엇인가요?", exact=True)).not_to_be_visible()
-            expect(page.locator("code").filter(has_text='search action == "deny"')).to_be_visible()
+            expect(page.locator("code").filter(has_text="table duration=24h firewall_logs")).to_be_visible()
+            expect(page.locator("code").filter(has_text='search message == "ERROR"')).to_be_visible()
             expect(page.get_by_role("button", name="쿼리 파일 다운로드", exact=True)).to_be_visible()
             expect(page.get_by_text("코드 영역 오른쪽 위의 복사 아이콘으로 쿼리를 복사할 수 있습니다.")).to_be_visible()
             browser.close()
