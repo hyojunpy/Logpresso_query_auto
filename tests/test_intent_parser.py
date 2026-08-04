@@ -63,6 +63,21 @@ class IntentParserTest(unittest.TestCase):
         self.assertIn("조회할 로그 수집기 이름", intent.missing_information)
         self.assertIn("실시간 조회 기간", intent.missing_information)
 
+    def test_extracts_stream_source_names_wildcard_and_window(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(request="sample1, audit_* 스트림을 10초간 보여줘")
+        )
+        self.assertEqual(intent.source_type, "stream")
+        self.assertEqual(intent.query_type, "stream")
+        self.assertEqual(intent.streams, ["sample1", "audit_*"])
+        self.assertEqual(intent.stream_window, "10s")
+        self.assertEqual(intent.missing_information, [])
+
+    def test_stream_window_is_optional_but_name_is_required(self):
+        intent = IntentParser().parse(GenerateQueryRequest(request="스트림을 보여줘"))
+        self.assertIn("조회할 스트림 이름", intent.missing_information)
+        self.assertNotIn("실시간 조회 기간", intent.missing_information)
+
     def test_extracts_evtx_file_source(self):
         intent = IntentParser().parse(
             GenerateQueryRequest(request=r"D:\data\evtx\System.evtx 파일을 조회해줘")

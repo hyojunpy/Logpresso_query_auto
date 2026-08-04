@@ -73,6 +73,27 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertTrue(any("네임스페이스" in question for question in response.questions))
         self.assertTrue(any("기간" in question for question in response.questions))
 
+    def test_generates_stream_query_with_window_and_pipeline(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="sample1, sample2 스트림을 10초간 level=error 조건으로 보여줘",
+                context=RequestContext(known_fields=["level", "message"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'stream window=10s sample1, sample2\n| search level == "error"',
+        )
+        self.assertIn("stream", response.validation.commands)
+
+    def test_generates_stream_query_without_optional_window(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="audit_* 스트림을 보여줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "stream audit_*")
+
     def test_generates_evtx_file_query(self):
         response = generator().generate(
             GenerateQueryRequest(request=r"D:\data\evtx\System.evtx 파일을 조회해줘")

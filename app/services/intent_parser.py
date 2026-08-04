@@ -51,8 +51,9 @@ class IntentParser:
         intent.fulltext_expression = self._fulltext_expression(text) if intent.source_type == "fulltext" else None
         intent.use_parameterized_time_range = self._looks_like_parameterized_time_range(text)
         intent.streams = self._streams(text) if intent.source_type == "stream" else []
+        intent.stream_window = self._realtime_window(text) if intent.source_type == "stream" else None
         intent.loggers = self._loggers(text) if intent.source_type == "logger" else []
-        intent.logger_window = self._logger_window(text) if intent.source_type == "logger" else None
+        intent.logger_window = self._realtime_window(text) if intent.source_type == "logger" else None
         if intent.source_type == "file":
             intent.file_path = self._file_path(text)
             intent.file_command = self._file_command(intent.file_path)
@@ -330,7 +331,11 @@ class IntentParser:
         return f'"{escaped}"'
 
     def _streams(self, text: str) -> list[str]:
-        return re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*스트림", text)
+        match = re.search(
+            r"([A-Za-z_][A-Za-z0-9_*.-]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_*.-]*)*)\s*스트림",
+            text,
+        )
+        return [item.strip() for item in match.group(1).split(",")] if match else []
 
     def _parser_name(self, text: str) -> str | None:
         explicit = re.search(r"\bparse\s+([A-Za-z_][A-Za-z0-9_.-]*)\b", text, flags=re.IGNORECASE)
@@ -358,7 +363,7 @@ class IntentParser:
     def _loggers(self, text: str) -> list[str]:
         return list(dict.fromkeys(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*\\[A-Za-z_][A-Za-z0-9_*.-]*)\b", text)))
 
-    def _logger_window(self, text: str) -> str | None:
+    def _realtime_window(self, text: str) -> str | None:
         units = {"초": "s", "분": "m", "시간": "h", "일": "d", "주": "w"}
         match = re.search(r"(\d+)\s*(초|분|시간|일|주)\s*(?:간|동안)?", text)
         if match:

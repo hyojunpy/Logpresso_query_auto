@@ -108,6 +108,8 @@ class QueryGenerator:
             return self._fulltext_query(intent)
         if intent.source_type == "logger":
             return self._logger_query(intent)
+        if intent.source_type == "stream":
+            return self._stream_query(intent)
         if intent.source_type == "file":
             return self._file_query(intent)
         if not intent.tables:
@@ -156,6 +158,19 @@ class QueryGenerator:
         if not intent.loggers or not intent.logger_window:
             raise ValueError("logger name and window are required to generate a logger query")
         lines = [f"logger window={intent.logger_window} {', '.join(intent.loggers)}"]
+        if intent.parser_name:
+            lines.append(f"| parse {intent.parser_name}")
+        lines.extend(self._filter_lines(intent))
+        lines.extend(f"| explode {field}" for field in intent.explode_fields)
+        return "\n".join(lines)
+
+    def _stream_query(self, intent: QueryIntent) -> str:
+        if not intent.streams:
+            raise ValueError("stream name is required to generate a stream query")
+        command = "stream"
+        if intent.stream_window:
+            command += f" window={intent.stream_window}"
+        lines = [f"{command} {', '.join(intent.streams)}"]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
         lines.extend(self._filter_lines(intent))
@@ -379,6 +394,8 @@ class QueryGenerator:
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 문자열 또는 IP를 전체 텍스트 검색 문법으로 조회합니다."))
             elif line.startswith("logger"):
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 로그 수집기의 데이터를 정해진 기간 동안 실시간으로 조회합니다."))
+            elif line.startswith("stream"):
+                explanations.append(QueryExplanation(query_part=line, reason="지정한 스트림에서 실시간 데이터를 수신합니다."))
             elif re.match(r"^(?:evtx|eml|lnk)-file\b", line):
                 explanations.append(QueryExplanation(query_part=line, reason="파일 형식에 맞는 문서 기반 명령으로 파일 내용을 조회합니다."))
             elif line.startswith("| search"):

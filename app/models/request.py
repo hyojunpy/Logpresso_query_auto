@@ -46,6 +46,7 @@ class QueryIntent(BaseModel):
     tables: list[str] = []
     loggers: list[str] = []
     streams: list[str] = []
+    stream_window: str | None = None
     logger_window: str | None = None
     file_command: str | None = None
     file_path: str | None = None
