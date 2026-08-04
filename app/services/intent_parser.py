@@ -401,7 +401,7 @@ class IntentParser:
         return match.group(1).lower() if match else None
 
     def _file_path(self, text: str) -> str | None:
-        extensions = r"evtx|eml|lnk|csv|tsv|json|txt"
+        extensions = r"evtx|eml|lnk|csv|tsv|json|txt|pcap|xml|pf|wer"
         quoted = re.search(rf"['\"]([^'\"]+\.(?:{extensions}))['\"]", text, flags=re.IGNORECASE)
         if quoted:
             return quoted.group(1)
@@ -423,6 +423,10 @@ class IntentParser:
             ".tsv": "csvfile",
             ".json": "jsonfile",
             ".txt": "textfile",
+            ".pcap": "pcapfile",
+            ".xml": "xmlfile",
+            ".pf": "prefetch-file",
+            ".wer": "wer-file",
         }
         lowered = path.lower()
         return next((command for extension, command in extension_commands.items() if lowered.endswith(extension)), None)

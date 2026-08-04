@@ -138,6 +138,20 @@ class QueryGeneratorTest(unittest.TestCase):
                 self.assertEqual(response.query, expected)
                 self.assertIn(expected.split()[0], response.validation.commands)
 
+    def test_generates_documented_forensic_file_queries(self):
+        cases = [
+            ("capture.pcap 파일을 조회해줘", "pcapfile capture.pcap"),
+            ("report.xml 파일을 조회해줘", "xmlfile report.xml"),
+            (r"C:\Windows\Prefetch\APP.PF 파일을 조회해줘", r"prefetch-file C:\Windows\Prefetch\APP.PF"),
+            ("Report.wer 파일을 조회해줘", "wer-file Report.wer"),
+        ]
+        for request, expected in cases:
+            with self.subTest(request=request):
+                response = generator().generate(GenerateQueryRequest(request=request))
+                self.assertEqual(response.status, "generated", response.questions)
+                self.assertEqual(response.query, expected)
+                self.assertIn(expected.split()[0], response.validation.commands)
+
     def test_references_only_generated_commands_when_possible(self):
         response = generator().generate(
             GenerateQueryRequest(

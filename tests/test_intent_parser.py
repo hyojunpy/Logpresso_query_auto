@@ -135,6 +135,20 @@ class IntentParserTest(unittest.TestCase):
                 self.assertEqual(intent.file_command, command)
                 self.assertEqual(intent.missing_information, [])
 
+    def test_extracts_documented_forensic_file_sources(self):
+        cases = [
+            ("capture.pcap 파일을 조회해줘", "pcapfile"),
+            ("report.xml 파일을 조회해줘", "xmlfile"),
+            (r"C:\Windows\Prefetch\APP.PF 파일을 조회해줘", "prefetch-file"),
+            ("Report.wer 파일을 조회해줘", "wer-file"),
+        ]
+        for request, command in cases:
+            with self.subTest(request=request):
+                intent = IntentParser().parse(GenerateQueryRequest(request=request))
+                self.assertEqual(intent.source_type, "file")
+                self.assertEqual(intent.file_command, command)
+                self.assertEqual(intent.missing_information, [])
+
     def test_extracts_firewall_count_request(self):
         payload = GenerateQueryRequest(
             request="최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘",
