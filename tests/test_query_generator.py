@@ -102,6 +102,20 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.query, r"evtx-file D:\data\evtx\System.evtx")
         self.assertIn("evtx-file", response.validation.commands)
 
+    def test_generates_documented_data_file_queries(self):
+        cases = [
+            (r"D:\data\events.csv 파일을 조회해줘", r"csvfile D:\data\events.csv"),
+            ("events.tsv 파일을 조회해줘", "csvfile events.tsv"),
+            ("/var/log/events.json 파일을 조회해줘", "jsonfile /var/log/events.json"),
+            ("app.txt 파일을 조회해줘", "textfile app.txt"),
+        ]
+        for request, expected in cases:
+            with self.subTest(request=request):
+                response = generator().generate(GenerateQueryRequest(request=request))
+                self.assertEqual(response.status, "generated", response.questions)
+                self.assertEqual(response.query, expected)
+                self.assertIn(expected.split()[0], response.validation.commands)
+
     def test_references_only_generated_commands_when_possible(self):
         response = generator().generate(
             GenerateQueryRequest(

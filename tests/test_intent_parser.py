@@ -98,6 +98,20 @@ class IntentParserTest(unittest.TestCase):
         )
         self.assertIn("공백 없는 파일 경로", intent.missing_information)
 
+    def test_extracts_documented_data_file_sources(self):
+        cases = [
+            (r"D:\data\events.csv 파일을 조회해줘", "csvfile"),
+            ("events.tsv 파일을 조회해줘", "csvfile"),
+            ("/var/log/events.json 파일을 조회해줘", "jsonfile"),
+            ("app.txt 파일을 조회해줘", "textfile"),
+        ]
+        for request, command in cases:
+            with self.subTest(request=request):
+                intent = IntentParser().parse(GenerateQueryRequest(request=request))
+                self.assertEqual(intent.source_type, "file")
+                self.assertEqual(intent.file_command, command)
+                self.assertEqual(intent.missing_information, [])
+
     def test_extracts_firewall_count_request(self):
         payload = GenerateQueryRequest(
             request="최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘",

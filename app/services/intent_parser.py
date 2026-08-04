@@ -372,11 +372,16 @@ class IntentParser:
         return match.group(1).lower() if match else None
 
     def _file_path(self, text: str) -> str | None:
-        quoted = re.search(r"['\"]([^'\"]+\.(?:evtx|eml|lnk))['\"]", text, flags=re.IGNORECASE)
+        extensions = r"evtx|eml|lnk|csv|tsv|json|txt"
+        quoted = re.search(rf"['\"]([^'\"]+\.(?:{extensions}))['\"]", text, flags=re.IGNORECASE)
         if quoted:
             return quoted.group(1)
-        match = re.search(r"(?:[A-Za-z]:\\|/)[^\s'\"]+\.(?:evtx|eml|lnk)\b", text, flags=re.IGNORECASE)
-        return match.group(0) if match else None
+        match = re.search(
+            rf"(?<![A-Za-z0-9_.-])((?:[A-Za-z]:\\|/)?[^\s'\"]+\.(?:{extensions}))\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return match.group(1) if match else None
 
     def _file_command(self, path: str | None) -> str | None:
         if not path:
@@ -385,6 +390,10 @@ class IntentParser:
             ".evtx": "evtx-file",
             ".eml": "eml-file",
             ".lnk": "lnk-file",
+            ".csv": "csvfile",
+            ".tsv": "csvfile",
+            ".json": "jsonfile",
+            ".txt": "textfile",
         }
         lowered = path.lower()
         return next((command for extension, command in extension_commands.items() if lowered.endswith(extension)), None)

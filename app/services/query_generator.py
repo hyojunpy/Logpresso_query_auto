@@ -25,7 +25,7 @@ class QueryGenerator:
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         intent = self.intent_parser.parse(payload)
-        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file search parse explode stats rollup timechart eval fields rename first last set setq"
+        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file csvfile jsonfile textfile search parse explode stats rollup timechart eval fields rename first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:
             return GenerateQueryResponse(
@@ -396,7 +396,7 @@ class QueryGenerator:
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 로그 수집기의 데이터를 정해진 기간 동안 실시간으로 조회합니다."))
             elif line.startswith("stream"):
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 스트림에서 실시간 데이터를 수신합니다."))
-            elif re.match(r"^(?:evtx|eml|lnk)-file\b", line):
+            elif re.match(r"^(?:(?:evtx|eml|lnk)-file|csvfile|jsonfile|textfile)\b", line):
                 explanations.append(QueryExplanation(query_part=line, reason="파일 형식에 맞는 문서 기반 명령으로 파일 내용을 조회합니다."))
             elif line.startswith("| search"):
                 explanations.append(QueryExplanation(query_part=line, reason="사용자 요청에서 추출한 필터 조건을 적용합니다."))
