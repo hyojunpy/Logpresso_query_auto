@@ -250,7 +250,10 @@ class IntentParser:
 
     def _tables(self, text: str, known_tables: list[str], allow_single_default: bool = True) -> list[str]:
         tables = [table for table in known_tables if table in text]
-        explicit = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:에서|의|테이블)", text)
+        explicit = re.findall(
+            r"([A-Za-z_*][A-Za-z0-9_*.-]*(?::[A-Za-z_][A-Za-z0-9_*.-]*)?)\s*(?:에서|의|테이블)",
+            text,
+        )
         for table in explicit:
             if table not in tables and table not in {"rename", "as"}:
                 tables.append(table)

@@ -209,6 +209,38 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status, "generated", response.questions)
         self.assertIn("| timechart span=10m count", response.query)
 
+    def test_generates_multiple_table_query_with_node_paths(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 동안 *:sys_cpu_logs와 node2:sys_mem_logs 테이블을 조회해줘",
+                context=RequestContext(
+                    known_tables=["*:sys_cpu_logs", "node2:sys_mem_logs"],
+                    known_fields=["_time"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            "table duration=1h *:sys_cpu_logs, node2:sys_mem_logs",
+        )
+
+    def test_parameterized_time_query_keeps_multiple_tables(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 7일을 매개변수로 firewall_logs와 web_logs 테이블을 조회해줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "web_logs"],
+                    known_fields=["_time"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'set from=ago("7d")\n| set to=str(now())\n| table from=$("from") to=$("to") firewall_logs, web_logs',
+        )
+
     def test_uses_valid_llm_query(self):
         response = generator(
             MockProvider(

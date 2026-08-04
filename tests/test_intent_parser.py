@@ -173,6 +173,19 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.group_by, ["src_ip"])
         self.assertEqual(intent.limit, 20)
 
+    def test_extracts_multiple_tables_and_node_paths(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="최근 1시간 동안 *:sys_cpu_logs와 node2:sys_mem_logs 테이블을 조회해줘",
+                context=RequestContext(
+                    known_tables=["*:sys_cpu_logs", "node2:sys_mem_logs"],
+                    known_fields=["_time"],
+                ),
+            )
+        )
+        self.assertEqual(intent.tables, ["*:sys_cpu_logs", "node2:sys_mem_logs"])
+        self.assertEqual(intent.time_range.duration, "1h")
+
     def test_missing_error_log_information(self):
         payload = GenerateQueryRequest(
             request="에러 로그 보여줘",

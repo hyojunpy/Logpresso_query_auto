@@ -22,6 +22,7 @@
 현재 자연어 생성기는 다음 요청 유형을 지원합니다.
 
 - 테이블 조회와 기간 지정: `최근 24시간`, `어제`, `YYYY-MM-DD부터 YYYY-MM-DD까지`
+- 쉼표로 연결된 다중 테이블과 `NODE:TABLE`·`*:TABLE` 경로 조회
 - 문자열, IP, 숫자 비교, 포함 검색과 동일·서로 다른 필드의 `AND`/`OR` 및 괄호형 OR 그룹
 - `stats`, `timechart`, `rollup` 기반 건수/합계/평균/비율 집계
 - `rename`, `fields`, `eval` 기반 필드명 변경, 출력 필드 선택, 계산 필드
@@ -234,7 +235,7 @@ pytest
 정상 기준:
 
 ```text
-192 passed, 1 skipped
+195 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.

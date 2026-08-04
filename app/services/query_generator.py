@@ -116,13 +116,12 @@ class QueryGenerator:
             raise ValueError("table is required to generate a table query")
         if intent.use_parameterized_time_range:
             return self._parameterized_table_query(intent)
-        table = intent.tables[0]
         first = "table"
         if intent.time_range and intent.time_range.duration:
             first += f" duration={intent.time_range.duration}"
         elif intent.time_range and intent.time_range.from_ and intent.time_range.to:
             first += f" from={intent.time_range.from_} to={intent.time_range.to}"
-        first += f" {table}"
+        first += f" {', '.join(intent.tables)}"
         lines = [first]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
@@ -221,7 +220,7 @@ class QueryGenerator:
         lines = [
             f'set from=ago("{intent.time_range.duration}")',
             "| set to=str(now())",
-            f'| table from=$("from") to=$("to") {intent.tables[0]}',
+            f'| table from=$("from") to=$("to") {", ".join(intent.tables)}',
         ]
         return "\n".join(lines)
 
