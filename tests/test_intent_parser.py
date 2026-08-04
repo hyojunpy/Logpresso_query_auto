@@ -449,6 +449,20 @@ class IntentParserTest(unittest.TestCase):
         )
         self.assertIn("복합 필터 괄호 구조", intent.missing_information)
 
+    def test_extracts_parenthesized_or_group_followed_by_and_filter(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="firewall_logs에서 (action=deny 또는 level=error) 그리고 host=web01인 로그 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs"],
+                    known_fields=["action", "level", "host"],
+                ),
+            )
+        )
+        self.assertEqual([item.field for item in intent.filters], ["action", "level", "host"])
+        self.assertEqual([item.conjunction for item in intent.filters], ["and", "or", "and"])
+        self.assertNotIn("복합 필터 괄호 구조", intent.missing_information)
+
     def test_extracts_contains_filter(self):
         payload = GenerateQueryRequest(
             request="app_logs에서 message에 timeout 포함된 로그 보여줘",

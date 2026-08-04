@@ -590,12 +590,23 @@ class IntentParser:
             for filter_ in filters[1:]:
                 filter_.conjunction = "or"
         elif has_or:
-            last_field = None
-            for filter_ in filters:
-                if last_field == filter_.field:
-                    filter_.conjunction = "or"
-                last_field = filter_.field
+            for group in self._parenthesized_or_groups(text):
+                indexes = [
+                    index
+                    for index, filter_ in enumerate(filters)
+                    if re.search(rf"(?<![A-Za-z0-9_]){re.escape(filter_.field)}(?![A-Za-z0-9_])", group)
+                ]
+                for index in indexes[1:]:
+                    filters[index].conjunction = "or"
         return filters
+
+    def _parenthesized_or_groups(self, text: str) -> list[str]:
+        groups = re.findall(r"\(([^()]*)\)", text)
+        return [
+            group
+            for group in groups
+            if any(word in group.lower() for word in ("또는", "혹은", "이거나", "거나", " or "))
+        ]
 
     def _contains_filters(self, text: str, known_fields: list[str]) -> list[FilterCondition]:
         if not known_fields:
@@ -975,7 +986,19 @@ class IntentParser:
         lowered = text.lower()
         has_or = any(word in lowered for word in ("또는", "혹은", "이거나", "거나", " or "))
         has_and = any(word in lowered for word in ("그리고", "이면서", "동시에", " 및 ", " and "))
-        return has_or and has_and and "(" not in text and ")" not in text
+        if not (has_or and has_and):
+            return False
+        if text.count("(") != text.count(")"):
+            return True
+        groups = self._parenthesized_or_groups(text)
+        if not groups:
+            return True
+        if any(any(word in group.lower() for word in ("그리고", "이면서", "동시에", " 및 ", " and ")) for group in groups):
+            return True
+        outside = text
+        for group in groups:
+            outside = outside.replace(f"({group})", "")
+        return any(word in outside.lower() for word in ("또는", "혹은", "이거나", "거나", " or "))
 
     def _looks_like_comparison(self, text: str) -> bool:
         return any(word in text for word in ("이상", "초과", "이하", "미만", ">=", "<=", ">", "<"))
