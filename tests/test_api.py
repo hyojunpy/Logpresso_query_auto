@@ -55,6 +55,26 @@ class ApiTest(unittest.TestCase):
         self.assertIsNone(body["query"])
         self.assertTrue(body["questions"])
 
+    def test_generate_rejects_oversized_natural_language_request(self):
+        response = self.client.post(
+            "/api/v1/query/generate",
+            json={"request": "x" * 4001, "context": {}},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"][0]["type"], "string_too_long")
+
+    def test_validate_rejects_oversized_query(self):
+        response = self.client.post(
+            "/api/v1/query/validate",
+            json={"query": "x" * 20001},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"][0]["type"], "string_too_long")
+
+    def test_command_search_rejects_oversized_query(self):
+        response = self.client.get("/api/v1/commands/search", params={"q": "x" * 501})
+        self.assertEqual(response.status_code, 422)
+
     def test_validate_invalid_query(self):
         response = self.client.post("/api/v1/query/validate", json={"query": "unknown firewall_logs"})
         body = response.json()

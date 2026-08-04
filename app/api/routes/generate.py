@@ -69,7 +69,7 @@ def validate_query(payload: ValidateQueryRequest = Body(..., openapi_examples=VA
 
 
 @router.get("/commands/search")
-def search_commands(q: str = Query(..., min_length=1)):
+def search_commands(q: str = Query(..., min_length=1, max_length=500)):
     return _retriever().search(q, limit=10)
 
 

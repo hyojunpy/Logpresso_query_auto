@@ -3,6 +3,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+MAX_NATURAL_LANGUAGE_LENGTH = 4_000
+MAX_QUERY_LENGTH = 20_000
+MAX_KNOWN_TABLES = 200
+MAX_KNOWN_FIELDS = 500
+
+
 class TimeRange(BaseModel):
     mode: Literal["duration", "absolute", "unknown"] = "unknown"
     duration: str | None = None
@@ -79,16 +85,24 @@ class QueryIntent(BaseModel):
 
 
 class RequestContext(BaseModel):
-    product: str | None = None
-    version: str | None = None
-    known_tables: list[str] = []
-    known_fields: list[str] = []
+    product: str | None = Field(default=None, max_length=32)
+    version: str | None = Field(default=None, max_length=64)
+    known_tables: list[str] = Field(default_factory=list, max_length=MAX_KNOWN_TABLES)
+    known_fields: list[str] = Field(default_factory=list, max_length=MAX_KNOWN_FIELDS)
 
 
 class GenerateQueryRequest(BaseModel):
-    request: str = Field(min_length=1, examples=["최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘"])
-    context: RequestContext = RequestContext()
+    request: str = Field(
+        min_length=1,
+        max_length=MAX_NATURAL_LANGUAGE_LENGTH,
+        examples=["최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘"],
+    )
+    context: RequestContext = Field(default_factory=RequestContext)
 
 
 class ValidateQueryRequest(BaseModel):
-    query: str = Field(min_length=1, examples=["table duration=24h firewall_logs\n| stats count by src_ip"])
+    query: str = Field(
+        min_length=1,
+        max_length=MAX_QUERY_LENGTH,
+        examples=["table duration=24h firewall_logs\n| stats count by src_ip"],
+    )

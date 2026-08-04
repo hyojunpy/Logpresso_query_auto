@@ -5,7 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 from app.core.config import settings
-from app.models.request import GenerateQueryRequest, RequestContext
+from app.models.request import MAX_NATURAL_LANGUAGE_LENGTH, GenerateQueryRequest, RequestContext
 from app.services.indexer import DocumentIndex
 from app.services.query_generator import QueryGenerator
 from app.services.retriever import Retriever
@@ -48,7 +48,13 @@ examples = [
 ]
 selected = st.selectbox("예제 요청", [""] + examples)
 default_request = selected or st.session_state.get("request_text", "")
-request_text = st.text_area("사용자 요청", value=default_request, height=130)
+request_text = st.text_area(
+    "사용자 요청",
+    value=default_request,
+    height=130,
+    max_chars=MAX_NATURAL_LANGUAGE_LENGTH,
+    help=f"최대 {MAX_NATURAL_LANGUAGE_LENGTH:,}자까지 입력할 수 있습니다.",
+)
 
 
 def request_fingerprint(text: str, context: RequestContext) -> str:
