@@ -57,6 +57,7 @@ class IntentParser:
         if intent.source_type == "file":
             intent.file_path = self._file_path(text)
             intent.file_command = self._file_command(intent.file_path)
+            intent.archive_member = self._archive_member(text) if intent.file_command == "zipfile" else None
         intent.selected_fields = self._selected_fields(text, context.known_fields)
         intent.computed_fields = self._computed_fields(text, context.known_fields)
         intent.parser_name = self._parser_name(text)
@@ -401,7 +402,7 @@ class IntentParser:
         return match.group(1).lower() if match else None
 
     def _file_path(self, text: str) -> str | None:
-        extensions = r"evtx|eml|lnk|csv|tsv|json|txt|pcap|xml|pf|wer"
+        extensions = r"evtx|eml|lnk|csv|tsv|json|txt|pcap|xml|pf|wer|zip"
         quoted = re.search(rf"['\"]([^'\"]+\.(?:{extensions}))['\"]", text, flags=re.IGNORECASE)
         if quoted:
             return quoted.group(1)
@@ -427,9 +428,18 @@ class IntentParser:
             ".xml": "xmlfile",
             ".pf": "prefetch-file",
             ".wer": "wer-file",
+            ".zip": "zipfile",
         }
         lowered = path.lower()
         return next((command for extension, command in extension_commands.items() if lowered.endswith(extension)), None)
+
+    def _archive_member(self, text: str) -> str | None:
+        match = re.search(
+            r"\.zip['\"]?\s*(?:파일\s*)?(?:안의|내의|에서)\s*['\"]?([^\s'\"]+)['\"]?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return match.group(1) if match else None
 
     def _filters(
         self,
@@ -890,6 +900,8 @@ class IntentParser:
             intent.missing_information.append("파일 형식에 맞는 명령")
         if intent.source_type == "file" and intent.file_path and any(char.isspace() for char in intent.file_path):
             intent.missing_information.append("공백 없는 파일 경로")
+        if intent.file_command == "zipfile" and not intent.archive_member:
+            intent.missing_information.append("ZIP 내부에서 조회할 파일 이름")
         if intent.source_type == "fulltext" and not intent.fulltext_expression:
             intent.missing_information.append("전체 텍스트 검색어")
         if intent.source_type != "fulltext" and any(word in text for word in ERROR_WORDS + DENY_WORDS) and not intent.filters:

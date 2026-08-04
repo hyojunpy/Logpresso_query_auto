@@ -50,6 +50,7 @@ class QueryIntent(BaseModel):
     logger_window: str | None = None
     file_command: str | None = None
     file_path: str | None = None
+    archive_member: str | None = None
     fulltext_expression: str | None = None
     time_range: TimeRange | None = None
     use_parameterized_time_range: bool = False

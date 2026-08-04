@@ -22,6 +22,7 @@ class DocxParserTest(unittest.TestCase):
         self.assertIn("xmlfile", names)
         self.assertIn("prefetch-file", names)
         self.assertIn("wer-file", names)
+        self.assertIn("zipfile", names)
         self.assertIn("parse", names)
         self.assertIn("explode", names)
         self.assertNotIn("where", names)

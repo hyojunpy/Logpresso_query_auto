@@ -14,7 +14,7 @@ from app.services.docx_parser import DocxParser
 
 
 TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9_.$()]+")
-INDEX_FORMAT_VERSION = "8"
+INDEX_FORMAT_VERSION = "9"
 
 
 def tokenize(text: str) -> list[str]:

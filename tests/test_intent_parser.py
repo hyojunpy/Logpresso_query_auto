@@ -149,6 +149,19 @@ class IntentParserTest(unittest.TestCase):
                 self.assertEqual(intent.file_command, command)
                 self.assertEqual(intent.missing_information, [])
 
+    def test_extracts_zip_path_and_member(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(request="/opt/logpresso/testdata.zip 안의 *.txt 파일을 조회해줘")
+        )
+        self.assertEqual(intent.file_command, "zipfile")
+        self.assertEqual(intent.file_path, "/opt/logpresso/testdata.zip")
+        self.assertEqual(intent.archive_member, "*.txt")
+        self.assertEqual(intent.missing_information, [])
+
+    def test_zip_source_needs_member_name(self):
+        intent = IntentParser().parse(GenerateQueryRequest(request="/opt/logpresso/testdata.zip 파일을 조회해줘"))
+        self.assertIn("ZIP 내부에서 조회할 파일 이름", intent.missing_information)
+
     def test_extracts_firewall_count_request(self):
         payload = GenerateQueryRequest(
             request="최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘",

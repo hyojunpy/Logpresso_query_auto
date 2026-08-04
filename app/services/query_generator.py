@@ -25,7 +25,7 @@ class QueryGenerator:
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         intent = self.intent_parser.parse(payload)
-        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file csvfile jsonfile textfile pcapfile xmlfile prefetch-file wer-file search parse parsejson parsecsv explode stats rollup timechart eval fields rename first last set setq"
+        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file csvfile jsonfile textfile pcapfile xmlfile prefetch-file wer-file zipfile search parse parsejson parsecsv explode stats rollup timechart eval fields rename first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:
             return GenerateQueryResponse(
@@ -183,7 +183,12 @@ class QueryGenerator:
     def _file_query(self, intent: QueryIntent) -> str:
         if not intent.file_command or not intent.file_path:
             raise ValueError("documented file command and path are required to generate a file query")
-        lines = [f"{intent.file_command} {intent.file_path}"]
+        source = f"{intent.file_command} {intent.file_path}"
+        if intent.file_command == "zipfile":
+            if not intent.archive_member:
+                raise ValueError("archive member is required to generate a zipfile query")
+            source += f" {intent.archive_member}"
+        lines = [source]
         if intent.parser_name:
             lines.append(f"| parse {intent.parser_name}")
         lines.extend(self._structured_parser_lines(intent))
@@ -301,6 +306,7 @@ class QueryGenerator:
             "조회할 파일 경로": "조회할 파일의 전체 경로는 무엇인가요?",
             "파일 형식에 맞는 명령": "파일 형식을 확인할 수 없습니다. 지원할 파일 종류와 경로를 알려주세요.",
             "공백 없는 파일 경로": "문서에서 공백 포함 경로의 인용 문법을 확인하지 못했습니다. 공백이 없는 경로를 알려주세요.",
+            "ZIP 내부에서 조회할 파일 이름": "ZIP 파일 안에서 조회할 텍스트 파일 이름이나 와일드카드 패턴을 알려주세요. 예: iis.txt 또는 *.txt",
             "적용할 파서 이름": "적용할 로그프레소 파서 이름은 무엇인가요? 예: openssh",
             "행으로 확장할 배열 필드명": "배열 원소마다 행으로 확장할 필드명은 무엇인가요? 예: tags",
             "필터에 사용할 필드명과 값": "필터에 사용할 필드명과 값은 무엇인가요?",
@@ -415,7 +421,7 @@ class QueryGenerator:
             elif line.startswith("stream"):
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 스트림에서 실시간 데이터를 수신합니다."))
             elif re.match(
-                r"^(?:(?:evtx|eml|lnk|prefetch|wer)-file|csvfile|jsonfile|textfile|pcapfile|xmlfile)\b",
+                r"^(?:(?:evtx|eml|lnk|prefetch|wer)-file|csvfile|jsonfile|textfile|pcapfile|xmlfile|zipfile)\b",
                 line,
             ):
                 explanations.append(QueryExplanation(query_part=line, reason="파일 형식에 맞는 문서 기반 명령으로 파일 내용을 조회합니다."))

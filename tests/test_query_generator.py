@@ -152,6 +152,21 @@ class QueryGeneratorTest(unittest.TestCase):
                 self.assertEqual(response.query, expected)
                 self.assertIn(expected.split()[0], response.validation.commands)
 
+    def test_generates_zipfile_query_with_required_member(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="/opt/logpresso/testdata.zip 안의 *.txt 파일을 조회해줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "zipfile /opt/logpresso/testdata.zip *.txt")
+        self.assertIn("zipfile", response.validation.commands)
+
+    def test_zipfile_query_needs_member_clarification(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="/opt/logpresso/testdata.zip 파일을 조회해줘")
+        )
+        self.assertEqual(response.status, "needs_clarification")
+        self.assertTrue(any("ZIP 파일 안" in question for question in response.questions))
+
     def test_references_only_generated_commands_when_possible(self):
         response = generator().generate(
             GenerateQueryRequest(

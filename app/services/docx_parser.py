@@ -13,7 +13,7 @@ COMMAND_HINTS = {
     "table", "search", "stats", "rollup", "timechart", "sort", "limit", "set", "setq",
     "stream", "fulltext", "logger", "fields", "eval", "rename", "parse", "explode",
     "evtx-file", "eml-file", "lnk-file", "csvfile", "jsonfile", "textfile", "pcapfile", "xmlfile",
-    "prefetch-file", "wer-file", "parsejson", "parsecsv",
+    "prefetch-file", "wer-file", "zipfile", "parsejson", "parsecsv",
 }
 
 FUNCTION_HINTS = {"count", "sum", "avg", "min", "max", "first", "last", "ago", "now", "str", "dateadd", "range", "iprange"}
