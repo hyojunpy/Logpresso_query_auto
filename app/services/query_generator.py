@@ -323,6 +323,7 @@ class QueryGenerator:
             "대표 로그로 출력할 필드명": "대표 로그로 출력할 필드명은 무엇인가요? 예: line 또는 message",
             "전체 텍스트 검색어": "전체 텍스트로 검색할 문자열이나 IP는 무엇인가요? 예: 1.2.3.4",
             "매개변수로 지정할 조회 기간": "매개변수로 지정할 조회 기간은 무엇인가요? 예: 최근 7일",
+            "복합 필터 괄호 구조": "AND와 OR를 함께 사용할 때 적용 순서를 괄호로 알려주세요. 예: (action=deny 또는 level=error) 그리고 host=web01",
         }
         return [mapping[item] for item in intent.missing_information if item in mapping] or [
             "쿼리 생성을 위해 부족한 조건을 알려주세요."

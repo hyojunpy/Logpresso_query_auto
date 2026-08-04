@@ -542,6 +542,35 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status, "generated", response.questions)
         self.assertEqual(response.query, 'table firewall_logs\n| search action == "deny" or action == "allow"')
 
+    def test_generates_or_filter_query_across_different_fields(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs에서 action=deny 또는 level=error인 로그 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs"],
+                    known_fields=["action", "level"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'table firewall_logs\n| search action == "deny" or level == "error"',
+        )
+
+    def test_mixed_and_or_without_parentheses_is_not_guessed(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs에서 action=deny 또는 level=error 그리고 host=web01인 로그 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs"],
+                    known_fields=["action", "level", "host"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "needs_clarification")
+        self.assertTrue(any("괄호" in question for question in response.questions))
+
     def test_generates_contains_filter_query(self):
         response = generator().generate(
             GenerateQueryRequest(

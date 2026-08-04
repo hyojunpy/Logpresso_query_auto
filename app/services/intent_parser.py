@@ -584,7 +584,12 @@ class IntentParser:
                 ):
                     continue
                 self._append_string_filter(filters, left, "==", raw_value, known_fields)
-        if any(word in text for word in ("또는", "혹은", "이거나", "거나", " or ")):
+        has_or = any(word in text for word in ("또는", "혹은", "이거나", "거나", " or "))
+        has_and = any(word in text for word in ("그리고", "이면서", "동시에", " 및 ", " and "))
+        if has_or and not has_and:
+            for filter_ in filters[1:]:
+                filter_.conjunction = "or"
+        elif has_or:
             last_field = None
             for filter_ in filters:
                 if last_field == filter_.field:
@@ -930,6 +935,8 @@ class IntentParser:
             intent.missing_information.append("비교 조건에 사용할 필드명과 값")
         if intent.source_type != "fulltext" and self._looks_like_string_filter(text) and not intent.filters:
             intent.missing_information.append("필터에 사용할 필드명과 값")
+        if intent.source_type != "fulltext" and self._has_mixed_boolean_filter(text):
+            intent.missing_information.append("복합 필터 괄호 구조")
         if any(word in text.lower() for word in ("rename", "이름 변경", "이름변경", "필드명 변경")) and not intent.renames:
             intent.missing_information.append("변경할 원본 필드명과 새 필드명")
         if self._looks_like_field_selection(text) and not intent.selected_fields:
@@ -963,6 +970,12 @@ class IntentParser:
         if self._looks_like_unique_values(text) and not intent.group_by:
             intent.missing_information.append("그룹 기준 필드명")
         intent.missing_information = list(dict.fromkeys(intent.missing_information))
+
+    def _has_mixed_boolean_filter(self, text: str) -> bool:
+        lowered = text.lower()
+        has_or = any(word in lowered for word in ("또는", "혹은", "이거나", "거나", " or "))
+        has_and = any(word in lowered for word in ("그리고", "이면서", "동시에", " 및 ", " and "))
+        return has_or and has_and and "(" not in text and ")" not in text
 
     def _looks_like_comparison(self, text: str) -> bool:
         return any(word in text for word in ("이상", "초과", "이하", "미만", ">=", "<=", ">", "<"))
