@@ -1,5 +1,6 @@
 from typing import Any
 from urllib import request
+from urllib.error import HTTPError, URLError
 import json
 
 from app.core.config import settings
@@ -24,6 +25,16 @@ class OllamaProvider(LLMProvider):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with request.urlopen(req, timeout=120) as response:
-            raw = json.loads(response.read().decode("utf-8"))
-            return parse_json_object(raw.get("response", raw))
+        try:
+            with request.urlopen(req, timeout=settings.ollama_timeout_seconds) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+                return parse_json_object(raw.get("response", raw))
+        except TimeoutError:
+            return {"status": "error", "error_type": "timeout", "message": "Ollama request timed out"}
+        except HTTPError as exc:
+            return {"status": "error", "error_type": "http_error", "message": f"Ollama returned HTTP {exc.code}"}
+        except URLError as exc:
+            error_type = "timeout" if isinstance(exc.reason, TimeoutError) else "connection_error"
+            return {"status": "error", "error_type": error_type, "message": "Ollama connection failed"}
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return {"status": "error", "error_type": "invalid_response", "message": "Ollama returned an invalid response"}

@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from app.models.request import GenerateQueryRequest, RequestContext
 from app.services.llm.mock_provider import MockProvider
+from app.services.llm.base import LLMProvider
 from app.services.query_generator import QueryGenerator
 from app.services.retriever import Retriever
 from tests.support import shared_index
@@ -12,7 +13,24 @@ def generator(llm=None) -> QueryGenerator:
     return QueryGenerator(Retriever(shared_index()), llm=llm)
 
 
+class RaisingProvider(LLMProvider):
+    def generate_json(self, prompt, context):
+        raise RuntimeError("sensitive provider failure")
+
+
 class QueryGeneratorTest(unittest.TestCase):
+    def test_unexpected_provider_failure_uses_safe_template_fallback(self):
+        response = generator(RaisingProvider()).generate(
+            GenerateQueryRequest(
+                request="firewall_logs에서 action=deny인 로그 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["action"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, 'table firewall_logs\n| search action == "deny"')
+        self.assertEqual(response.debug["llm_error_type"], "provider_exception")
+        self.assertNotIn("sensitive provider failure", str(response.debug))
+
     def test_generates_named_parse_query(self):
         response = generator().generate(
             GenerateQueryRequest(

@@ -1,5 +1,6 @@
 from typing import Any
 from urllib import request
+from urllib.error import HTTPError, URLError
 import json
 
 from app.core.config import settings
@@ -28,6 +29,16 @@ class OpenAIProvider(LLMProvider):
             },
             method="POST",
         )
-        with request.urlopen(req, timeout=60) as response:
-            raw = json.loads(response.read().decode("utf-8"))
-            return parse_json_object(extract_openai_text(raw) or raw)
+        try:
+            with request.urlopen(req, timeout=settings.openai_timeout_seconds) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+                return parse_json_object(extract_openai_text(raw) or raw)
+        except TimeoutError:
+            return {"status": "error", "error_type": "timeout", "message": "OpenAI request timed out"}
+        except HTTPError as exc:
+            return {"status": "error", "error_type": "http_error", "message": f"OpenAI returned HTTP {exc.code}"}
+        except URLError as exc:
+            error_type = "timeout" if isinstance(exc.reason, TimeoutError) else "connection_error"
+            return {"status": "error", "error_type": error_type, "message": "OpenAI connection failed"}
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return {"status": "error", "error_type": "invalid_response", "message": "OpenAI returned an invalid response"}

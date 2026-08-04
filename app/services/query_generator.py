@@ -46,19 +46,29 @@ class QueryGenerator:
             )
 
         prompt = self._generation_prompt(payload, intent, results)
-        llm_data = self.llm.generate_json(prompt, results)
+        try:
+            llm_data = self.llm.generate_json(prompt, results)
+        except Exception:
+            llm_data = {
+                "status": "error",
+                "error_type": "provider_exception",
+                "message": "LLM provider failed unexpectedly",
+            }
         llm_query = self._query_from_llm(llm_data)
         query = llm_query or self._template_query(intent)
         validation = self.validator.validate(query)
         repair_attempts = 0
         while not validation.valid and repair_attempts < 2:
             repair_attempts += 1
-            repaired_data = self.llm.repair_json(
-                self._repair_prompt(query, validation.errors, results),
-                query,
-                validation.errors,
-                results,
-            )
+            try:
+                repaired_data = self.llm.repair_json(
+                    self._repair_prompt(query, validation.errors, results),
+                    query,
+                    validation.errors,
+                    results,
+                )
+            except Exception:
+                break
             repaired = self._query_from_llm(repaired_data)
             if not repaired or repaired == query:
                 break
@@ -91,6 +101,7 @@ class QueryGenerator:
                 "retrieved": len(results),
                 "reference_mode": "commands" if references else "retrieval_fallback",
                 "llm_status": llm_data.get("status"),
+                "llm_error_type": llm_data.get("error_type"),
                 "llm_used": bool(llm_query) and not used_template_fallback,
                 "template_fallback": used_template_fallback,
                 "repair_attempts": repair_attempts,

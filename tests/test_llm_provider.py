@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 import json
 
 from app.services.llm.json_utils import parse_json_object
@@ -43,6 +44,24 @@ class LLMProviderTest(unittest.TestCase):
         with patch("app.services.llm.ollama_provider.request.urlopen", return_value=FakeResponse(payload)):
             data = OllamaProvider().generate_json("prompt", [])
         self.assertEqual(data["query"], "table logs")
+
+    def test_openai_timeout_returns_safe_error_without_api_key(self):
+        with patch("app.services.llm.openai_provider.settings.openai_api_key", "super-secret-key"):
+            with patch("app.services.llm.openai_provider.request.urlopen", side_effect=TimeoutError):
+                data = OpenAIProvider().generate_json("prompt", [])
+        self.assertEqual(data["status"], "error")
+        self.assertEqual(data["error_type"], "timeout")
+        self.assertNotIn("super-secret-key", str(data))
+
+    def test_ollama_connection_failure_returns_safe_error(self):
+        with patch(
+            "app.services.llm.ollama_provider.request.urlopen",
+            side_effect=URLError("private network detail"),
+        ):
+            data = OllamaProvider().generate_json("prompt", [])
+        self.assertEqual(data["status"], "error")
+        self.assertEqual(data["error_type"], "connection_error")
+        self.assertNotIn("private network detail", str(data))
 
 
 if __name__ == "__main__":
