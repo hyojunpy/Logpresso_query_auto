@@ -701,6 +701,26 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status, "generated", response.questions)
         self.assertEqual(response.query, "table firewall_logs\n| sort -_time, login_name")
 
+    def test_generates_documented_limit_offset_and_maximum(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs에서 10건을 건너뛰고 20건 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table firewall_logs\n| limit 10 20")
+
+    def test_limit_offset_without_maximum_is_not_guessed(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs에서 10건을 건너뛰고 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(response.status, "needs_clarification")
+        self.assertTrue(any("최대 몇 건" in question for question in response.questions))
+
     def test_generates_top_n_count_query(self):
         response = generator().generate(
             GenerateQueryRequest(

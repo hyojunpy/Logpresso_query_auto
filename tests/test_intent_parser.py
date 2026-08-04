@@ -561,6 +561,28 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.sort[0].direction, "desc")
         self.assertEqual(intent.limit, 10)
 
+    def test_extracts_limit_offset_and_maximum(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="firewall_logs에서 10건을 건너뛰고 20건 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(intent.offset, 10)
+        self.assertEqual(intent.limit, 20)
+        self.assertEqual(intent.missing_information, [])
+
+    def test_offset_without_maximum_needs_clarification(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="firewall_logs에서 10건을 건너뛰고 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(intent.offset, 10)
+        self.assertIsNone(intent.limit)
+        self.assertIn("건너뛴 이후 출력 건수", intent.missing_information)
+
     def test_extracts_bottom_n_sort_and_limit(self):
         payload = GenerateQueryRequest(
             request="firewall_logs에서 src_ip별 건수 하위 5개 보여줘",

@@ -154,7 +154,8 @@ class QueryGenerator:
             ]
             lines.append(f"| sort {', '.join(sort_fields)}")
         if intent.limit:
-            lines.append(f"| limit {intent.limit}")
+            offset = f"{intent.offset} " if intent.offset is not None else ""
+            lines.append(f"| limit {offset}{intent.limit}")
         return "\n".join(lines)
 
     def _logger_query(self, intent: QueryIntent) -> str:
@@ -317,6 +318,7 @@ class QueryGenerator:
             "사용자 집계에 사용할 필드명": "사용자 집계에 사용할 필드명은 무엇인가요? 예: login_name",
             "조회 기간": "조회 기간은 어떻게 지정할까요? 예: 최근 24시간, 지난 7일",
             "출력 건수 제한": "출력 건수 제한은 몇 건으로 할까요?",
+            "건너뛴 이후 출력 건수": "지정한 건수를 건너뛴 뒤 최대 몇 건을 출력할까요?",
             "그룹 기준 필드명": "그룹 기준으로 사용할 필드명은 무엇인가요?",
             "변경할 원본 필드명과 새 필드명": "변경할 원본 필드명과 새 필드명은 무엇인가요? 예: src_ip를 할당ip로",
             "출력할 필드명": "출력할 필드명은 무엇인가요? 예: src_ip, action",

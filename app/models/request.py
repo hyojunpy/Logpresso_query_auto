@@ -70,6 +70,7 @@ class QueryIntent(BaseModel):
     aggregation_command: Literal["stats", "rollup"] = "stats"
     final_aggregations: list[Aggregation] = []
     sort: list[SortCondition] = []
+    offset: int | None = None
     limit: int | None = None
     output_format: str | None = None
     assumptions: list[str] = []

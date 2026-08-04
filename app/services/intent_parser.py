@@ -78,6 +78,7 @@ class IntentParser:
         intent.post_filters = self._post_filters(text, intent.aggregations)
         intent.filters = self._filters(text, context.known_fields, intent.post_filters)
         intent.sort = self._sort(text, intent.aggregations, context.known_fields)
+        intent.offset = self._offset(text)
         intent.limit = self._limit(text)
 
         if "실시간" in text:
@@ -944,7 +945,23 @@ class IntentParser:
         top_bottom = re.search(r"(?:top|bottom|상위|하위)\s*(\d+)", text, flags=re.IGNORECASE)
         if top_bottom:
             return int(top_bottom.group(1))
+        paged = re.search(
+            r"\d+\s*(?:개|건|줄|행)\s*(?:을|를)?\s*(?:건너뛰고|건너뛴\s*후|제외하고)\s*"
+            r"(\d+)\s*(?:개|건|줄|행)",
+            text,
+        )
+        if paged:
+            return int(paged.group(1))
+        if self._offset(text) is not None:
+            return None
         match = re.search(r"(\d+)\s*(?:개|건|줄|행)", text)
+        return int(match.group(1)) if match else None
+
+    def _offset(self, text: str) -> int | None:
+        match = re.search(
+            r"(\d+)\s*(?:개|건|줄|행)\s*(?:을|를)?\s*(?:건너뛰고|건너뛴\s*후|제외하고)",
+            text,
+        )
         return int(match.group(1)) if match else None
 
     def _collect_missing_information(self, intent: QueryIntent, text: str, known_fields: list[str]) -> None:
@@ -1001,6 +1018,8 @@ class IntentParser:
             intent.missing_information.append("조회 기간")
         if not intent.limit and not intent.time_range and any(word in text for word in ("전체", "모든", "대량", "제한 없이")):
             intent.missing_information.append("출력 건수 제한")
+        if intent.offset is not None and intent.limit is None:
+            intent.missing_information.append("건너뛴 이후 출력 건수")
         if known_fields and intent.aggregations and any(word in text for word in ("IP별", "사용자별")) and not intent.group_by:
             intent.missing_information.append("그룹 기준 필드명")
         if self._looks_like_ratio(text) and not intent.group_by:
