@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Body, Query
+from pathlib import Path
 
 from app.core.config import settings
 from app.models.request import GenerateQueryRequest, ValidateQueryRequest
@@ -12,7 +13,11 @@ router = APIRouter()
 
 
 def _retriever() -> Retriever:
-    return Retriever(DocumentIndex(settings.db_path))
+    index = DocumentIndex(settings.db_path)
+    default_db_path = settings.data_dir / "app.db"
+    if Path(settings.db_path).resolve() == default_db_path.resolve() and Path(settings.doc_path).exists():
+        index.ensure_current(settings.doc_path)
+    return Retriever(index)
 
 
 GENERATE_EXAMPLES = {

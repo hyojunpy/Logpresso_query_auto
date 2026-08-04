@@ -1,5 +1,6 @@
 import json
 import hashlib
+from pathlib import Path
 
 import streamlit as st
 
@@ -13,6 +14,8 @@ from app.services.retriever import Retriever
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
 
 index = DocumentIndex(settings.db_path)
+if Path(settings.doc_path).exists():
+    index.ensure_current(settings.doc_path)
 status = index.status(settings.doc_path)
 
 with st.sidebar:
