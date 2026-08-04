@@ -184,7 +184,7 @@ class QueryGenerator:
             command += f" from={self._fulltext_time(intent.time_range.from_)} to={self._fulltext_time(intent.time_range.to)}"
         if intent.limit:
             command += f" limit={intent.limit}"
-        command += f" {self._quote_fulltext_expression(intent.fulltext_expression)}"
+        command += f" {self._format_fulltext_expression(intent.fulltext_expression)}"
         if intent.tables:
             command += f" from {', '.join(intent.tables)}"
         return command
@@ -285,6 +285,18 @@ class QueryGenerator:
     def _quote_fulltext_expression(self, expression: str) -> str:
         escaped = expression.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
+
+    def _format_fulltext_expression(self, expression: str) -> str:
+        number = r"-?\d+(?:\.\d+)?"
+        ipv4 = r"(?:\d{1,3}\.){3}\d{1,3}"
+        if re.fullmatch(rf"range\({number},\s*{number}\)", expression):
+            return expression
+        if re.fullmatch(rf'iprange\("{ipv4}",\s*"{ipv4}"\)', expression):
+            return expression
+        boolean_tokens = re.sub(r'"(?:[^"\\]|\\.)*"|\band\b|\bor\b|[()\s]', "", expression)
+        if not boolean_tokens and re.search(r'"', expression):
+            return expression
+        return self._quote_fulltext_expression(expression)
 
     def _fulltext_time(self, value: str) -> str:
         digits = re.sub(r"\D", "", value)

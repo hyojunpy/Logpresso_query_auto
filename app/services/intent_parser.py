@@ -252,6 +252,18 @@ class IntentParser:
         return tables
 
     def _fulltext_expression(self, text: str) -> str | None:
+        ip_range = re.search(
+            r"\b((?:\d{1,3}\.){3}\d{1,3})\s*(?:~|부터|에서)\s*((?:\d{1,3}\.){3}\d{1,3})\b",
+            text,
+        )
+        if ip_range:
+            return f'iprange("{ip_range.group(1)}", "{ip_range.group(2)}")'
+        numeric_range = re.search(r"(?<![\d.])(-?\d+(?:\.\d+)?)\s*(?:~|부터|에서)\s*(-?\d+(?:\.\d+)?)(?![\d.])", text)
+        if numeric_range and any(word in text for word in ("범위", "사이", "range")):
+            return f"range({numeric_range.group(1)}, {numeric_range.group(2)})"
+        boolean_expression = self._fulltext_boolean_expression(text)
+        if boolean_expression:
+            return boolean_expression
         ip = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
         if ip:
             return ip.group(0)
@@ -268,6 +280,52 @@ class IntentParser:
                 if candidate not in ignored:
                     return candidate
         return None
+
+    def _fulltext_boolean_expression(self, text: str) -> str | None:
+        quoted_terms = [term.strip() for term in re.findall(r"['\"]([^'\"]+)['\"]", text) if term.strip()]
+        lowered = text.lower()
+        has_or = any(word in lowered for word in (" 또는 ", " 혹은 ", " or "))
+        has_and = any(word in lowered for word in (" 그리고 ", " 및 ", " and ", "포함하면서", "포함하고"))
+        if len(quoted_terms) >= 3 and has_and and has_or:
+            return (
+                f"{self._quote_fulltext_term(quoted_terms[0])} and "
+                f"({self._quote_fulltext_term(quoted_terms[1])} or {self._quote_fulltext_term(quoted_terms[2])})"
+            )
+        if len(quoted_terms) >= 2 and (has_and or has_or):
+            operator = "or" if has_or and not has_and else "and"
+            return f" {operator} ".join(self._quote_fulltext_term(term) for term in quoted_terms)
+
+        token = r"[가-힣A-Za-z0-9_.:/-]+"
+        combined = re.search(
+            rf"({token})\s*(?:을|를)?\s*포함(?:하면서|하고).*?({token})\s*(?:또는|혹은|or)\s*({token})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if combined:
+            first, second, third = combined.groups()
+            return (
+                f"{self._quote_fulltext_term(first)} and "
+                f"({self._quote_fulltext_term(second)} or {self._quote_fulltext_term(third)})"
+            )
+        alternative = re.search(
+            rf"({token})\s*(?:또는|혹은|or)\s*({token}).*?(?:포함|검색|찾아)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if alternative:
+            return " or ".join(self._quote_fulltext_term(term) for term in alternative.groups())
+        conjunction = re.search(
+            rf"({token})\s*(?:와|과|그리고|및|and)\s*({token}).*?(?:모두\s*)?(?:포함|검색|찾아)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if conjunction:
+            return " and ".join(self._quote_fulltext_term(term) for term in conjunction.groups())
+        return None
+
+    def _quote_fulltext_term(self, term: str) -> str:
+        escaped = term.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
 
     def _streams(self, text: str) -> list[str]:
         return re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*스트림", text)

@@ -15,7 +15,7 @@ COMMAND_HINTS = {
     "evtx-file", "eml-file", "lnk-file",
 }
 
-FUNCTION_HINTS = {"count", "sum", "avg", "min", "max", "first", "last", "ago", "now", "str", "dateadd"}
+FUNCTION_HINTS = {"count", "sum", "avg", "min", "max", "first", "last", "ago", "now", "str", "dateadd", "range", "iprange"}
 
 
 class DocxParser:

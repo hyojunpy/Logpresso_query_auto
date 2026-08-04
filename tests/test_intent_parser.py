@@ -468,6 +468,33 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.fulltext_expression, "1.2.3.4")
         self.assertEqual(intent.time_range.duration, "24h")
 
+    def test_extracts_fulltext_and_or_expression(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request='최근 1시간 iis 테이블에서 "game"을 포함하면서 "MSIE" 또는 "Firefox"가 포함된 로그 fulltext 검색',
+                context=RequestContext(known_tables=["iis"]),
+            )
+        )
+        self.assertEqual(intent.source_type, "fulltext")
+        self.assertEqual(intent.fulltext_expression, '"game" and ("MSIE" or "Firefox")')
+
+    def test_extracts_fulltext_numeric_range(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="최근 1시간 iis 테이블에서 400~500 범위 숫자 fulltext 검색",
+                context=RequestContext(known_tables=["iis"]),
+            )
+        )
+        self.assertEqual(intent.fulltext_expression, "range(400, 500)")
+
+    def test_extracts_fulltext_ip_range(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="최근 1시간 전체 테이블에서 192.0.0.1~192.0.0.255 IP 범위 fulltext 검색"
+            )
+        )
+        self.assertEqual(intent.fulltext_expression, 'iprange("192.0.0.1", "192.0.0.255")')
+
     def test_fulltext_search_needs_expression(self):
         payload = GenerateQueryRequest(
             request="최근 24시간 동안 전체 테이블에서 로그 검색",

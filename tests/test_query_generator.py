@@ -629,6 +629,51 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.query, 'fulltext duration=24h "1.2.3.4"')
         self.assertIn("fulltext", response.validation.commands)
 
+    def test_generates_fulltext_and_or_expression(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request='최근 1시간 iis 테이블에서 "game"을 포함하면서 "MSIE" 또는 "Firefox"가 포함된 로그 fulltext 검색',
+                context=RequestContext(known_tables=["iis"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'fulltext duration=1h "game" and ("MSIE" or "Firefox") from iis',
+        )
+
+    def test_generates_fulltext_numeric_range(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 iis 테이블에서 400~500 범위 숫자 fulltext 검색",
+                context=RequestContext(known_tables=["iis"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "fulltext duration=1h range(400, 500) from iis")
+        self.assertIn("range", response.validation.functions)
+
+    def test_generates_fulltext_ip_range(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 전체 테이블에서 192.0.0.1~192.0.0.255 IP 범위 fulltext 검색"
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'fulltext duration=1h iprange("192.0.0.1", "192.0.0.255")',
+        )
+        self.assertIn("iprange", response.validation.functions)
+
+    def test_quotes_range_like_text_instead_of_treating_it_as_raw_syntax(self):
+        response = generator().generate(
+            GenerateQueryRequest(request='최근 1시간 전체 테이블에서 "range(1, 2) | fake" fulltext 검색')
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, 'fulltext duration=1h "range(1, 2) | fake"')
+        self.assertEqual(response.validation.commands, ["fulltext"])
+
     def test_generates_fulltext_specific_table_query(self):
         response = generator().generate(
             GenerateQueryRequest(
