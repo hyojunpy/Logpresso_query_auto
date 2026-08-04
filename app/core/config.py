@@ -18,6 +18,14 @@ class Settings:
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3.1")
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
+    cors_allowed_origins: tuple[str, ...] = tuple(
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:8501,http://127.0.0.1:8501",
+        ).split(",")
+        if origin.strip()
+    )
 
 
 @lru_cache
@@ -26,4 +34,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-

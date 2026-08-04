@@ -19,6 +19,7 @@
 - Playwright 기반 Streamlit 실제 브라우저 회귀 테스트
 - 쿼리 자동 실행 없음
 - 자연어·직접 쿼리·검색어 및 컨텍스트 크기 제한
+- 보안 응답 헤더와 환경 변수 기반 CORS 허용 목록
 
 현재 자연어 생성기는 다음 요청 유형을 지원합니다.
 
@@ -69,6 +70,7 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1
+CORS_ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
 ```
 
 API 키가 없어도 `mock` 모드에서 문서 검색, 예제 생성, UI 확인이 가능합니다.
@@ -238,7 +240,7 @@ pytest
 정상 기준:
 
 ```text
-206 passed, 1 skipped
+209 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.

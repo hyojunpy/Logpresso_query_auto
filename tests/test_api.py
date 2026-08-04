@@ -27,6 +27,38 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_api_responses_include_security_headers(self):
+        response = self.client.get("/api/v1/health")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(response.headers["x-frame-options"], "DENY")
+        self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+        self.assertEqual(
+            response.headers["permissions-policy"],
+            "camera=(), microphone=(), geolocation=()",
+        )
+
+    def test_cors_allows_configured_streamlit_origin(self):
+        response = self.client.options(
+            "/api/v1/query/generate",
+            headers={
+                "Origin": "http://localhost:8501",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:8501")
+
+    def test_cors_does_not_allow_unconfigured_origin(self):
+        response = self.client.options(
+            "/api/v1/query/generate",
+            headers={
+                "Origin": "https://example.invalid",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        self.assertNotIn("access-control-allow-origin", response.headers)
+
     def test_generate_success(self):
         response = self.client.post(
             "/api/v1/query/generate",
