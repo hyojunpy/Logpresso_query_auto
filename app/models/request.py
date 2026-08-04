@@ -53,6 +53,7 @@ class QueryIntent(BaseModel):
     archive_member: str | None = None
     fulltext_expression: str | None = None
     time_range: TimeRange | None = None
+    source_order: Literal["asc", "desc"] | None = None
     use_parameterized_time_range: bool = False
     filters: list[FilterCondition] = []
     post_filters: list[FilterCondition] = []

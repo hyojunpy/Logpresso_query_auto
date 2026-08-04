@@ -186,6 +186,18 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.tables, ["*:sys_cpu_logs", "node2:sys_mem_logs"])
         self.assertEqual(intent.time_range.duration, "1h")
 
+    def test_extracts_source_record_order(self):
+        cases = [("오래된 로그부터", "asc"), ("최신 로그부터", "desc")]
+        for wording, expected in cases:
+            with self.subTest(wording=wording):
+                intent = IntentParser().parse(
+                    GenerateQueryRequest(
+                        request=f"firewall_logs에서 {wording} 보여줘",
+                        context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+                    )
+                )
+                self.assertEqual(intent.source_order, expected)
+
     def test_missing_error_log_information(self):
         payload = GenerateQueryRequest(
             request="에러 로그 보여줘",

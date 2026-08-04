@@ -225,6 +225,16 @@ class QueryGeneratorTest(unittest.TestCase):
             "table duration=1h *:sys_cpu_logs, node2:sys_mem_logs",
         )
 
+    def test_generates_table_source_order_option(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 firewall_logs에서 오래된 로그부터 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table duration=1h order=asc firewall_logs")
+
     def test_parameterized_time_query_keeps_multiple_tables(self):
         response = generator().generate(
             GenerateQueryRequest(
@@ -239,6 +249,32 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(
             response.query,
             'set from=ago("7d")\n| set to=str(now())\n| table from=$("from") to=$("to") firewall_logs, web_logs',
+        )
+
+    def test_parameterized_time_query_keeps_source_order(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 7일을 매개변수로 firewall_logs를 오래된 로그부터 조회해줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'set from=ago("7d")\n| set to=str(now())\n| table from=$("from") to=$("to") order=asc firewall_logs',
+        )
+
+    def test_fulltext_keeps_offset_limit_and_source_order_options(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request='최근 1시간 app_logs에서 fulltext로 "timeout"을 검색해서 10건을 건너뛰고 20건을 오래된 로그부터 보여줘',
+                context=RequestContext(known_tables=["app_logs"], known_fields=["message"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'fulltext duration=1h limit=20 offset=10 order=asc "timeout" from app_logs',
         )
 
     def test_uses_valid_llm_query(self):

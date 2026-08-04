@@ -121,6 +121,8 @@ class QueryGenerator:
             first += f" duration={intent.time_range.duration}"
         elif intent.time_range and intent.time_range.from_ and intent.time_range.to:
             first += f" from={intent.time_range.from_} to={intent.time_range.to}"
+        if intent.source_order:
+            first += f" order={intent.source_order}"
         first += f" {', '.join(intent.tables)}"
         lines = [first]
         if intent.parser_name:
@@ -221,7 +223,9 @@ class QueryGenerator:
         lines = [
             f'set from=ago("{intent.time_range.duration}")',
             "| set to=str(now())",
-            f'| table from=$("from") to=$("to") {", ".join(intent.tables)}',
+            f'| table from=$("from") to=$("to")'
+            f'{f" order={intent.source_order}" if intent.source_order else ""}'
+            f' {", ".join(intent.tables)}',
         ]
         return "\n".join(lines)
 
@@ -235,6 +239,10 @@ class QueryGenerator:
             command += f" from={self._fulltext_time(intent.time_range.from_)} to={self._fulltext_time(intent.time_range.to)}"
         if intent.limit:
             command += f" limit={intent.limit}"
+        if intent.offset is not None:
+            command += f" offset={intent.offset}"
+        if intent.source_order:
+            command += f" order={intent.source_order}"
         command += f" {self._format_fulltext_expression(intent.fulltext_expression)}"
         if intent.tables:
             command += f" from {', '.join(intent.tables)}"

@@ -41,6 +41,7 @@ class IntentParser:
         context = payload.context
         intent = QueryIntent(objective=text)
         intent.time_range = self._time_range(text)
+        intent.source_order = self._source_order(text)
         intent.query_type = "adhoc"
         intent.source_type = self._source_type(text)
         intent.tables = self._tables(
@@ -133,6 +134,14 @@ class IntentParser:
         for phrase, duration in relative.items():
             if phrase in text:
                 return TimeRange(mode="duration", duration=duration)
+        return None
+
+    def _source_order(self, text: str) -> str | None:
+        lowered = text.lower()
+        if any(phrase in lowered for phrase in ("오래된 로그부터", "오래된 순서", "과거 로그부터", "과거부터", "order=asc")):
+            return "asc"
+        if any(phrase in lowered for phrase in ("최신 로그부터", "최신순", "최근 로그부터", "order=desc")):
+            return "desc"
         return None
 
     def _explicit_datetime_range(self, text: str) -> TimeRange | None:
