@@ -148,9 +148,12 @@ class QueryGenerator:
         if intent.final_aggregations:
             lines.append(f"| stats {self._format_aggregation_list(intent.final_aggregations)}")
         lines.extend(self._post_filter_lines(intent))
-        for sort in intent.sort:
-            prefix = "-" if sort.direction == "desc" else ""
-            lines.append(f"| sort {prefix}{sort.field}")
+        if intent.sort:
+            sort_fields = [
+                f"{'-' if sort.direction == 'desc' else ''}{sort.field}"
+                for sort in intent.sort
+            ]
+            lines.append(f"| sort {', '.join(sort_fields)}")
         if intent.limit:
             lines.append(f"| limit {intent.limit}")
         return "\n".join(lines)

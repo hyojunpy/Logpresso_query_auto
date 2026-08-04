@@ -656,6 +656,19 @@ class QueryGeneratorTest(unittest.TestCase):
             "table metrics_logs\n| stats avg(bytes) as avg_bytes by host\n| sort -avg_bytes\n| limit 10",
         )
 
+    def test_generates_multiple_sort_fields_in_one_documented_command(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs를 _time 내림차순 후 login_name 오름차순으로 정렬해줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs"],
+                    known_fields=["_time", "login_name", "message"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table firewall_logs\n| sort -_time, login_name")
+
     def test_generates_top_n_count_query(self):
         response = generator().generate(
             GenerateQueryRequest(

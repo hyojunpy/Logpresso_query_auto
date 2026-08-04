@@ -523,6 +523,21 @@ class IntentParserTest(unittest.TestCase):
         self.assertEqual(intent.sort[0].field, "avg_bytes")
         self.assertEqual(intent.sort[0].direction, "asc")
 
+    def test_extracts_multiple_explicit_sort_fields_in_order(self):
+        intent = IntentParser().parse(
+            GenerateQueryRequest(
+                request="firewall_logs를 _time 내림차순 후 login_name 오름차순으로 정렬해줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs"],
+                    known_fields=["_time", "login_name", "message"],
+                ),
+            )
+        )
+        self.assertEqual(
+            [(item.field, item.direction) for item in intent.sort],
+            [("_time", "desc"), ("login_name", "asc")],
+        )
+
     def test_extracts_top_n_sort_and_limit(self):
         payload = GenerateQueryRequest(
             request="firewall_logs에서 src_ip별 건수 TOP 10 보여줘",

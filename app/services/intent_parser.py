@@ -77,7 +77,7 @@ class IntentParser:
         intent.final_aggregations = self._final_aggregations(text, intent.group_by)
         intent.post_filters = self._post_filters(text, intent.aggregations)
         intent.filters = self._filters(text, context.known_fields, intent.post_filters)
-        intent.sort = self._sort(text, intent.aggregations)
+        intent.sort = self._sort(text, intent.aggregations, context.known_fields)
         intent.limit = self._limit(text)
 
         if "실시간" in text:
@@ -896,7 +896,31 @@ class IntentParser:
             return [field] if field else []
         return []
 
-    def _sort(self, text: str, aggregations: list[Aggregation]) -> list[SortCondition]:
+    def _sort(
+        self,
+        text: str,
+        aggregations: list[Aggregation],
+        known_fields: list[str],
+    ) -> list[SortCondition]:
+        candidates = list(dict.fromkeys(
+            known_fields
+            + [aggregation.alias for aggregation in aggregations if aggregation.alias]
+            + ["count"]
+        ))
+        if candidates:
+            field_pattern = "|".join(re.escape(field) for field in sorted(candidates, key=len, reverse=True))
+            explicit = re.findall(
+                rf"(?<![A-Za-z0-9_])({field_pattern})(?![A-Za-z0-9_])\s*(?:을|를|기준으로)?\s*"
+                r"(내림차순|오름차순|높은 순|낮은 순|많은 순|적은 순)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if explicit:
+                descending = {"내림차순", "높은 순", "많은 순"}
+                return [
+                    SortCondition(field=field, direction="desc" if direction in descending else "asc")
+                    for field, direction in explicit
+                ]
         sort_field = self._sort_field(text, aggregations)
         lowered = text.lower()
         if any(word in lowered for word in ("top", "상위", "많은 순", "높은 순", "큰 순", "내림차순", "많이", "가장 많이", "많이 나온")):
