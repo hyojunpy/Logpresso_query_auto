@@ -14,6 +14,15 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Verify documentation publication approval
+        env:
+          DOCS_PUBLICATION_APPROVED: ${{ vars.DOCS_PUBLICATION_APPROVED }}
+        run: |
+          if [ "$DOCS_PUBLICATION_APPROVED" != "true" ]; then
+            echo "::error::Set DOCS_PUBLICATION_APPROVED=true after confirming redistribution rights for the bundled DOCX manual."
+            exit 1
+          fi
+
       - name: Check out repository
         uses: actions/checkout@v5
 

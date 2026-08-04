@@ -38,6 +38,7 @@ def test_deployment_configuration_has_healthchecks_and_tag_releases() -> None:
     assert "/_stcore/health" in compose
     assert 'tags:' in release
     assert '"v*"' in release
+    assert "DOCS_PUBLICATION_APPROVED" in release
     assert "python -m pytest" in release
     assert "gh release create" in release
     assert "contents: write" in release
