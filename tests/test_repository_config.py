@@ -23,3 +23,21 @@ def test_dependabot_updates_python_and_github_actions_dependencies() -> None:
     assert "package-ecosystem: pip" in config
     assert "package-ecosystem: github-actions" in config
     assert config.count("interval: weekly") == 2
+
+
+def test_deployment_configuration_has_healthchecks_and_tag_releases() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "HEALTHCHECK" in dockerfile
+    assert "/api/v1/health" in dockerfile
+    assert compose.count("healthcheck:") == 2
+    assert "/_stcore/health" in compose
+    assert 'tags:' in release
+    assert '"v*"' in release
+    assert "python -m pytest" in release
+    assert "gh release create" in release
+    assert "contents: write" in release

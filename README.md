@@ -246,7 +246,7 @@ pytest
 정상 기준:
 
 ```text
-217 passed, 1 skipped
+218 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.
@@ -284,6 +284,18 @@ docker compose up --build
 
 `docs`와 `data` 디렉터리는 볼륨으로 연결됩니다. API 키는 이미지에 포함하지 않고 환경 변수로 주입합니다.
 `.env`가 없어도 compose 기본값으로 `LLM_PROVIDER=mock` 모드가 사용됩니다. Ollama를 컨테이너에서 호출하려면 기본값은 `http://host.docker.internal:11434`입니다.
+API와 UI 컨테이너에는 각각 상태 확인용 헬스체크가 설정되어 있습니다.
+
+## 릴리스
+
+`v`로 시작하는 태그를 푸시하면 GitHub Release와 변경 내역이 자동 생성됩니다.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+태그를 만들기 전에 `pyproject.toml`의 프로젝트 버전과 태그 버전이 일치하는지 확인하십시오.
 
 ## 보안 및 제약
 
