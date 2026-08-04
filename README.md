@@ -22,6 +22,7 @@
 - 보안 응답 헤더와 환경 변수 기반 CORS 허용 목록
 - OpenAI/Ollama 타임아웃·연결 오류의 안전한 템플릿 fallback
 - 본문을 제외한 JSON 요청 로그와 응답별 `X-Request-ID`
+- GitHub CodeQL 정적 분석과 Dependabot 주간 의존성 업데이트
 
 현재 자연어 생성기는 다음 요청 유형을 지원합니다.
 
@@ -245,7 +246,7 @@ pytest
 정상 기준:
 
 ```text
-215 passed, 1 skipped
+217 passed, 1 skipped
 ```
 
 `pytest`가 없는 런타임에서는 표준 라이브러리 테스트도 실행할 수 있습니다.
