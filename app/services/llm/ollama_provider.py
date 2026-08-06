@@ -11,12 +11,32 @@ from app.services.llm.json_utils import parse_json_object
 
 class OllamaProvider(LLMProvider):
     def generate_json(self, prompt: str, context: list[SearchResult]) -> dict[str, Any]:
+        response_format: dict[str, Any] | str = {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["generated", "needs_clarification", "unsupported"]},
+                "query": {"type": ["string", "null"]},
+                "clarifying_questions": {"type": "array", "items": {"type": "string"}},
+                "assumptions": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["status", "query"],
+        }
+        try:
+            prompt_data = json.loads(prompt)
+            if isinstance(prompt_data, dict) and isinstance(prompt_data.get("response_schema"), dict):
+                response_format = prompt_data["response_schema"]
+        except (TypeError, ValueError):
+            pass
         body = json.dumps(
             {
                 "model": settings.ollama_model,
                 "prompt": prompt,
                 "stream": False,
-                "format": "json",
+                "format": response_format,
+                "options": {
+                    "temperature": 0,
+                    "num_predict": 96,
+                },
             }
         ).encode("utf-8")
         req = request.Request(

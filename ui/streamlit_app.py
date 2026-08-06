@@ -361,6 +361,13 @@ if response:
     with tabs[3]:
         st.json(response.get("references", []))
     with tabs[4]:
+        debug = response.get("debug", {})
+        if response.get("assumptions") or debug.get("llm_intent_fallback"):
+            st.subheader("AI 해석 결과")
+            if debug.get("llm_intent_fallback"):
+                st.info("AI가 구조화한 요청을 기존 검증기를 통과한 뒤 쿼리로 조립했습니다.")
+            for assumption in response.get("assumptions", []):
+                st.warning(f"추정: {assumption}")
         st.json(response.get("intent", {}))
     with tabs[5]:
         st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))

@@ -2,8 +2,11 @@ from functools import lru_cache
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(BASE_DIR / ".env")
 
 
 class Settings:
@@ -20,6 +23,7 @@ class Settings:
     ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3.1")
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     ollama_timeout_seconds: float = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
+    enable_llm_intent_fallback: bool = os.getenv("ENABLE_LLM_INTENT_FALLBACK", "true").lower() in {"1", "true", "yes"}
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()

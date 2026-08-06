@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.models.request import GenerateQueryRequest, QueryIntent
 from app.models.response import ExecutionPreview, GenerateQueryResponse, QueryExplanation
 from app.services.citation_service import references_for_query_parts, references_from_results
-from app.services.intent_parser import IntentParser
+from app.services.intent_parser import DENY_WORDS, ERROR_WORDS, IntentParser
 from app.services.llm.base import LLMProvider
 from app.services.llm.mock_provider import MockProvider
 from app.services.llm.ollama_provider import OllamaProvider
@@ -46,6 +46,9 @@ class QueryGenerator:
                 debug={"reason": "문서 인덱스에 검색 결과가 없습니다. /documents/reindex를 실행하십시오."},
             )
         if intent.missing_information:
+            assisted = self._llm_intent_fallback(payload, intent, results)
+            if assisted is not None:
+                return assisted
             return GenerateQueryResponse(
                 status="needs_clarification",
                 query=None,
@@ -124,6 +127,91 @@ class QueryGenerator:
         syntax.compatibility_notes.extend(schema.compatibility_notes)
         syntax.valid = not syntax.errors
         return syntax
+
+    def _llm_intent_fallback(self, payload: GenerateQueryRequest, intent: QueryIntent, results):
+        """Use an enabled real LLM only when deterministic intent extraction needs help."""
+        if not settings.enable_llm_intent_fallback or settings.llm_provider == "mock":
+            return None
+
+        data = self.llm.generate_json(self._intent_resolution_prompt(payload, intent, results), results)
+        query = self._query_from_llm_intent(data, intent)
+        if not query:
+            return None
+
+        validation = self._validate(query, payload)
+        if not validation.valid:
+            return None
+
+        references = references_for_query_parts(
+            self.retriever,
+            query,
+            "LLM-assisted query commands were matched to the indexed documentation.",
+        )
+        quality = self.quality_analyzer.analyze(query, validation)
+        preview = self.execution_preview.build(query, validation, quality)
+        assumptions = [*intent.assumptions, "Query structure was resolved by the LLM and passed local validation."]
+        llm_assumptions = data.get("assumptions")
+        if isinstance(llm_assumptions, list):
+            assumptions.extend(value for value in llm_assumptions if isinstance(value, str))
+        return GenerateQueryResponse(
+            status="generated",
+            query=query,
+            intent=intent,
+            validation=validation,
+            schema_validation=self.catalog.validate_query(query, payload.context),
+            quality=quality,
+            execution_preview=preview,
+            explanation=self._explain(query),
+            references=references or references_from_results(results, "LLM-assisted query context."),
+            assumptions=list(dict.fromkeys(assumptions)),
+            debug={
+                "provider": settings.llm_provider,
+                "retrieved": len(results),
+                "llm_status": data.get("status"),
+                "llm_used": True,
+                "llm_intent_fallback": True,
+                "template_fallback": False,
+                "repair_attempts": 0,
+            },
+        )
+
+    @staticmethod
+    def _query_from_llm_intent(data: dict, intent: QueryIntent) -> str | None:
+        if data.get("status") != "generated":
+            return None
+        table = data.get("table")
+        if not isinstance(table, str) or table not in intent.tables:
+            return None
+
+        duration = data.get("duration")
+        if not isinstance(duration, str) or not re.fullmatch(r"\d+[smhdw]", duration):
+            duration = intent.time_range.duration if intent.time_range and intent.time_range.duration else None
+        if not duration:
+            return None
+
+        lines = [f"table duration={duration} {table}"]
+        filter_field = data.get("filter_field")
+        filter_value = data.get("filter_value")
+        requires_filter = any(word.lower() in intent.objective.lower() for word in ERROR_WORDS + DENY_WORDS)
+        if requires_filter and not (isinstance(filter_field, str) and isinstance(filter_value, str)):
+            return None
+        if isinstance(filter_field, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", filter_field) and isinstance(filter_value, str):
+            lines.append(f'| search {filter_field} == "{filter_value.replace(chr(34), chr(92) + chr(34))}"')
+
+        group_by = data.get("group_by")
+        if isinstance(group_by, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", group_by):
+            lines.append(f"| stats count by {group_by}")
+        else:
+            lines.append("| stats count")
+
+        if data.get("sort_desc", True):
+            lines.append("| sort -count")
+        limit = data.get("limit")
+        if not isinstance(limit, int) or not 1 <= limit <= 10000:
+            limit = intent.limit
+        if isinstance(limit, int):
+            lines.append(f"| limit {limit}")
+        return "\n".join(lines)
 
     def _safe_template_query(self, intent: QueryIntent) -> str:
         try:
@@ -430,6 +518,54 @@ class QueryGenerator:
                 "query": "string or null",
                 "clarifying_questions": ["string"],
                 "assumptions": ["string"],
+            },
+        }
+        return json.dumps(body, ensure_ascii=False, indent=2)
+
+    def _intent_resolution_prompt(self, payload: GenerateQueryRequest, intent: QueryIntent, results) -> str:
+        body = {
+            "task": (
+                "Extract a read-only count query plan. Do not write query syntax. "
+                "When the request names a table and a clear result, return generated. "
+                "Infer fields only when strongly indicated and record each inference in assumptions."
+            ),
+            "request": payload.request,
+            "allowed_tables": intent.tables,
+            "detected_duration": intent.time_range.duration if intent.time_range else None,
+            "detected_limit": intent.limit,
+            "required_semantics": {
+                "must_include_error_filter": any(word.lower() in payload.request.lower() for word in ERROR_WORDS),
+                "must_include_deny_filter": any(word.lower() in payload.request.lower() for word in DENY_WORDS),
+            },
+            "semantic_field_hints": {
+                "error_or_failure": {"filter_field": "severity", "filter_value": "error"},
+                "deny_or_block": {"filter_field": "action", "filter_value": "deny"},
+                "account_or_user": ["account_id", "account", "user", "login_name"],
+                "source_ip": "src_ip",
+                "destination_ip": "dst_ip",
+            },
+            "catalog_tables": [table.table_name for table in (payload.context.catalog.tables if payload.context.catalog else [])],
+            "manual_hints": [
+                {
+                    "entry_name": result.entry_name,
+                    "excerpt": result.excerpt[:180],
+                }
+                for result in results[:1]
+            ],
+            "response_schema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["generated", "needs_clarification", "unsupported"]},
+                    "table": {"type": ["string", "null"]},
+                    "duration": {"type": ["string", "null"]},
+                    "filter_field": {"type": ["string", "null"]},
+                    "filter_value": {"type": ["string", "null"]},
+                    "group_by": {"type": ["string", "null"]},
+                    "limit": {"type": ["integer", "null"]},
+                    "sort_desc": {"type": "boolean"},
+                    "assumptions": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["status", "table", "duration", "group_by", "sort_desc"],
             },
         }
         return json.dumps(body, ensure_ascii=False, indent=2)

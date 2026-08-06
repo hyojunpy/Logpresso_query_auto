@@ -5,6 +5,7 @@ import re
 
 from app.models.request import (
     Aggregation,
+    ComputedField,
     FilterCondition,
     GenerateQueryRequest,
     QueryIntent,
@@ -46,6 +47,12 @@ class IntentParser:
         intent.query_type = "adhoc"
         intent.source_type = self._source_type(text, context.known_streams)
         intent.tables = self._tables(text, context.known_tables, allow_single_default=intent.source_type != "fulltext")
+        semantic_hints = self._semantic_field_hints(text, intent.tables)
+        known_fields = list(dict.fromkeys([*known_fields, *semantic_hints]))
+        if semantic_hints:
+            intent.assumptions.append(
+                f"Natural-language field aliases inferred: {', '.join(semantic_hints)}. Confirm them against the catalog."
+            )
         intent.fulltext_expression = self._fulltext_expression(text) if intent.source_type == "fulltext" else None
         intent.use_parameterized_time_range = self._looks_like_parameterized_time_range(text)
         intent.streams = self._streams(text, context.known_streams) if intent.source_type == "stream" else []
@@ -55,6 +62,7 @@ class IntentParser:
         intent.computed_fields = self._computed_fields(text, known_fields)
         intent.renames = self._renames(text, known_fields)
         intent.join = self._join(text, intent.tables, known_fields, intent.source_type, intent.streams, intent.loggers)
+        self._append_join_match_indicator(text, intent)
         intent.aggregations = self._aggregations(text, known_fields)
         intent.group_by = self._group_by(text, known_fields)
         intent.aggregation_command = "rollup" if self._looks_like_ratio(text) and intent.group_by else "stats"
@@ -79,6 +87,25 @@ class IntentParser:
         return intent
 
     @staticmethod
+    def _append_join_match_indicator(text: str, intent: QueryIntent) -> None:
+        if not intent.join or not any(phrase in text for phrase in ("새 컬럼", "새로운 칼럼", "매칭 여부", "포함된 경우")):
+            return
+        join = intent.join
+        right_field = join.right_rename or f"{join.right_table}_{join.right_key}"
+        if join.right_key == join.left_key and not join.right_rename:
+            join.right_rename = right_field
+        indicator_name = f"{join.right_table}_{join.right_key}_match"
+        if any(field.name == indicator_name for field in intent.computed_fields):
+            return
+        intent.computed_fields.append(
+            ComputedField(
+                name=indicator_name,
+                expression=f'if(isnull({right_field}), "unmatched", "matched")',
+            )
+        )
+        intent.assumptions.append("Experimental eval expression generated for join-match classification.")
+
+    @staticmethod
     def _partition_join_filters(text: str, join: JoinSpec, filters: list[FilterCondition]) -> list[FilterCondition]:
         post_join_filters: list[FilterCondition] = []
         lowered = text.lower()
@@ -91,6 +118,26 @@ class IntentParser:
             else:
                 post_join_filters.append(filter_)
         return post_join_filters
+
+    @staticmethod
+    def _semantic_field_hints(text: str, tables: list[str]) -> list[str]:
+        """Infer only conventional fields when a request explicitly names their meaning."""
+        hints: list[str] = []
+        lowered = text.lower()
+        is_firewall_request = any("firewall" in table.lower() for table in tables)
+        if "출발지 ip" in lowered or "source ip" in lowered or "source_ip" in lowered:
+            hints.append("src_ip")
+        if "도착지 ip" in lowered or "destination ip" in lowered or "dest ip" in lowered:
+            hints.append("dst_ip")
+        if any(phrase in text for phrase in ("계정", "account")):
+            hints.append("account_id")
+        if "호스트" in text or "host" in lowered:
+            hints.append("host")
+        if is_firewall_request and any(word in lowered for word in DENY_WORDS):
+            hints.append("action")
+        if any(word.lower() in lowered for word in ERROR_WORDS) and any("app" in table.lower() for table in tables):
+            hints.append("severity")
+        return hints
 
     @staticmethod
     def _explicit_fields(text: str) -> list[str]:
@@ -119,9 +166,28 @@ class IntentParser:
         if len(tables) < 2 and not (realtime_source and tables):
             return None
         mentioned_fields = [field for field in known_fields if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", text)]
+        # Supports fully specified join mappings even when no sidebar schema is supplied.
+        explicit_pairs = re.findall(
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:의|\.)\s*([A-Za-z_][A-Za-z0-9_]*)",
+            text,
+        )
+        for _, field in explicit_pairs:
+            if field not in mentioned_fields:
+                mentioned_fields.append(field)
+        same_key_match = re.search(
+            r"(?:join\s*key|조인\s*키)\s*(?:는|은)?\s*(?:둘다|둘\s*다|양쪽|both)\s*([A-Za-z_][A-Za-z0-9_]*)",
+            text,
+            flags=re.IGNORECASE,
+        )
         key_match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)?\s*(?:기준|키)", text)
-        left_key = key_match.group(1) if key_match and key_match.group(1) in known_fields else (mentioned_fields[0] if mentioned_fields else "")
-        right_key = next((field for field in mentioned_fields if field != left_key), "")
+        if same_key_match:
+            left_key = right_key = same_key_match.group(1)
+        elif len(explicit_pairs) >= 2:
+            left_key = explicit_pairs[0][1]
+            right_key = explicit_pairs[1][1]
+        else:
+            left_key = key_match.group(1) if key_match else (mentioned_fields[0] if mentioned_fields else "")
+            right_key = next((field for field in mentioned_fields if field != left_key), "")
         if not left_key or not right_key:
             return None
         lowered = text.lower()
@@ -134,17 +200,24 @@ class IntentParser:
             join_type = "full"
         elif "right" in lowered or "오른쪽 조인" in text:
             join_type = "right"
-        elif "left" in lowered or "왼쪽 조인" in text:
+        elif "left" in lowered or "레프트" in text or "왼쪽 조인" in text:
             join_type = "left"
         command = "streamjoin" if "streamjoin" in lowered or "스트림 조인" in text else "join"
         if command == "streamjoin" and join_type not in {"inner", "left", "leftonly"}:
             return None
+        left_table = realtime_source or tables[0]
+        right_table = tables[0] if realtime_source else tables[1]
+        if not realtime_source and "방화벽 로그" in text:
+            firewall_table = next((table for table in tables if "firewall" in table.lower()), None)
+            if firewall_table:
+                left_table = firewall_table
+                right_table = next(table for table in tables if table != firewall_table)
         return JoinSpec(
             command=command,
             join_type=join_type,
             left_source_type=source_type if realtime_source else "table",
-            left_table=realtime_source or tables[0],
-            right_table=tables[0] if realtime_source else tables[1],
+            left_table=left_table,
+            right_table=right_table,
             left_key=left_key,
             right_key=right_key,
             left_rename=self._rename_target(text, left_key),
@@ -319,10 +392,26 @@ class IntentParser:
 
     def _tables(self, text: str, known_tables: list[str], allow_single_default: bool = True) -> list[str]:
         tables = [table for table in known_tables if table in text]
+        explicit_pair_tables = re.findall(
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:의|\.)\s*[A-Za-z_][A-Za-z0-9_]*",
+            text,
+        )
+        for table in explicit_pair_tables:
+            if table not in tables and table.lower() not in {"rename", "as", "db", "table", "tables", "log", "logs"}:
+                tables.append(table)
         explicit = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:에서|의|테이블)", text)
         for table in explicit:
-            if table not in tables and table not in {"rename", "as"}:
+            if table not in tables and table.lower() not in {"rename", "as", "db", "table", "tables", "log", "logs"}:
                 tables.append(table)
+        declared_groups = re.findall(
+            r"(?:테이블은|tables?\s*(?:are|=|:))\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        for group in declared_groups:
+            for table in (value.strip() for value in group.split(",")):
+                if table not in tables:
+                    tables.append(table)
         if self._looks_like_parameterized_time_range(text):
             parameter_tables = re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:을|를)?\s*(?:동적으로|매개변수|파라미터)", text)
             for table in parameter_tables:
@@ -807,6 +896,9 @@ class IntentParser:
         if "사용자" in text and ("별" in text or "사용자의" in text):
             field = self._field_or_missing(known_fields, "login_name", "user")
             return [field] if field else []
+        if "계정" in text and "별" in text:
+            field = self._field_or_missing(known_fields, "account_id", "account", "user", "login_name")
+            return [field] if field else []
         return []
 
     def _sort(self, text: str, aggregations: list[Aggregation]) -> list[SortCondition]:
@@ -851,7 +943,12 @@ class IntentParser:
         numeric_filters = all_filters
         if self._looks_like_comparison(text) and not any(filter_.value_type == "number" for filter_ in numeric_filters):
             intent.missing_information.append("비교 조건에 사용할 필드명과 값")
-        if intent.source_type != "fulltext" and self._looks_like_string_filter(text) and not all_filters:
+        if (
+            intent.source_type != "fulltext"
+            and self._looks_like_string_filter(text)
+            and not all_filters
+            and not any("Experimental eval expression" in assumption for assumption in intent.assumptions)
+        ):
             intent.missing_information.append("필터에 사용할 필드명과 값")
         if any(word in text.lower() for word in ("join", "조인")) and not intent.join:
             intent.missing_information.append("left/right 조인할 두 테이블과 각 조인 키 필드")

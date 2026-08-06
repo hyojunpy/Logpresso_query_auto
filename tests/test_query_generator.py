@@ -1,7 +1,9 @@
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch
 
-from app.models.request import GenerateQueryRequest, RequestContext
+from app.core.config import settings
+from app.models.request import Catalog, CatalogField, CatalogTable, GenerateQueryRequest, RequestContext
 from app.services.llm.mock_provider import MockProvider
 from app.services.query_generator import QueryGenerator
 from app.services.retriever import Retriever
@@ -99,6 +101,24 @@ class QueryGeneratorTest(unittest.TestCase):
         )
         self.assertIn("join", response.validation.commands)
 
+    def test_generates_explicit_korean_possessive_join_without_sidebar_schema(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip와 firewall_djt의 dst_ip를 src_ip를 기준으로 left join 해줘",
+                context=RequestContext(),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            "table firewall_logs\n"
+            "| eval _join_key = src_ip\n"
+            "| join type=left _join_key [\n"
+            "    table firewall_djt\n"
+            "    | eval _join_key = dst_ip\n"
+            "]",
+        )
+
     def test_generates_full_join_when_requested(self):
         response = generator().generate(
             GenerateQueryRequest(
@@ -111,6 +131,63 @@ class QueryGeneratorTest(unittest.TestCase):
         )
         self.assertEqual(response.status, "generated", response.questions)
         self.assertIn("| join type=full _join_key [", response.query)
+
+    def test_generates_firewall_deny_aggregation_from_natural_language_aliases(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 24시간 firewall_logs에서 출발지 IP별 차단 건수를 많은 순으로 20개 보여줘",
+                context=RequestContext(),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'table duration=24h firewall_logs\n'
+            '| search action == "deny"\n'
+            "| stats count by src_ip\n"
+            "| sort -count\n"
+            "| limit 20",
+        )
+        self.assertTrue(any("Natural-language field aliases inferred" in item for item in response.intent.assumptions))
+
+    def test_understands_declared_tables_same_join_key_and_firewall_left_join(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request=(
+                    "인사 DB 테이블의 ip 컬럼이랑 방화벽 테이블의 ip 컬럼 레프트 조인해서 방화벽 로그에 따라 볼수 있게 작성해줘\n"
+                    "추가 조건: 테이블은 insa, firewall 조인키는 둘다 ip"
+                ),
+                context=RequestContext(),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            "table firewall\n"
+            "| eval _join_key = ip\n"
+            "| join type=left _join_key [\n"
+            "    table insa\n"
+            "    | eval _join_key = ip\n"
+            "]",
+        )
+
+    def test_generates_experimental_eval_for_join_match_indicator(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request=(
+                    "인사와 방화벽을 IP로 left join해줘\n"
+                    "추가 조건: 테이블은 insa, firewall / 조인키는 둘 다 ip\n"
+                    "추가 조건: firewall의 log에서 insa에 있는 ip가 포함된 경우는 새로운 칼럼에서 모아서 볼 수 있게 만들어줘"
+                ),
+                context=RequestContext(),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("table firewall", response.query)
+        self.assertIn("table insa", response.query)
+        self.assertIn("rename ip as insa_ip", response.query)
+        self.assertIn('eval insa_ip_match = if(isnull(insa_ip), "unmatched", "matched")', response.query)
+        self.assertTrue(any(issue.code == "unknown_function" for issue in response.validation.warnings))
 
     def test_generates_left_streamjoin_with_table_subquery(self):
         response = generator().generate(
@@ -241,6 +318,64 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status, "generated")
         self.assertIn('| search action == "deny"', response.query)
         self.assertTrue(response.debug["llm_used"])
+
+    def test_llm_resolves_missing_intent_when_real_provider_is_enabled(self):
+        instance = generator(
+            MockProvider(
+                generation_response={
+                    "status": "generated",
+                    "table": "custom_logs",
+                    "duration": "24h",
+                    "filter_field": "severity",
+                    "filter_value": "error",
+                    "group_by": "account",
+                    "limit": 20,
+                    "sort_desc": True,
+                    "assumptions": ["severity and account were inferred from the request wording."],
+                }
+            )
+        )
+        with patch.object(settings, "llm_provider", "openai"):
+            response = instance.generate(
+                GenerateQueryRequest(
+                    request="최근 24시간 custom_logs에서 client_group별 오류 건수 20개를 보여줘",
+                    context=RequestContext(
+                        known_tables=["custom_logs"],
+                        request_catalog=Catalog(
+                            source="fixture",
+                            tables=[
+                                CatalogTable(
+                                    table_name="custom_logs",
+                                    fields=[
+                                        CatalogField(field_name="severity", field_type="string"),
+                                        CatalogField(field_name="account", field_type="string"),
+                                    ],
+                                )
+                            ],
+                        ),
+                    ),
+                )
+            )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertTrue(response.debug["llm_intent_fallback"])
+        self.assertIn("stats count by account", response.query)
+        self.assertTrue(any("inferred from the request" in item for item in response.assumptions))
+
+    def test_generates_account_error_aggregation_from_common_aliases(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 24시간 app_logs에서 계정별 오류 건수 20개를 보여줘",
+                context=RequestContext(),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'table duration=24h app_logs\n'
+            '| search severity == "error"\n'
+            "| stats count by account_id\n"
+            "| limit 20",
+        )
 
     def test_repairs_invalid_llm_query(self):
         response = generator(
