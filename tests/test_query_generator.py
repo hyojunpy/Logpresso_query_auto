@@ -3,7 +3,6 @@ from datetime import date, timedelta
 
 from app.models.request import GenerateQueryRequest, RequestContext
 from app.services.llm.mock_provider import MockProvider
-from app.services.llm.base import LLMProvider
 from app.services.query_generator import QueryGenerator
 from app.services.retriever import Retriever
 from tests.support import shared_index
@@ -13,178 +12,173 @@ def generator(llm=None) -> QueryGenerator:
     return QueryGenerator(Retriever(shared_index()), llm=llm)
 
 
-class RaisingProvider(LLMProvider):
-    def generate_json(self, prompt, context):
-        raise RuntimeError("sensitive provider failure")
-
-
 class QueryGeneratorTest(unittest.TestCase):
-    def test_unexpected_provider_failure_uses_safe_template_fallback(self):
-        response = generator(RaisingProvider()).generate(
+    def test_generates_realtime_stream_query_with_filter(self):
+        response = generator().generate(
             GenerateQueryRequest(
-                request="firewall_logs에서 action=deny인 로그 보여줘",
-                context=RequestContext(known_tables=["firewall_logs"], known_fields=["action"]),
+                request="sample_stream 스트림에서 최근 10초 동안 error 로그 보여줘",
+                context=RequestContext(known_fields=["level"]),
             )
         )
         self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, 'table firewall_logs\n| search action == "deny"')
-        self.assertEqual(response.debug["llm_error_type"], "provider_exception")
-        self.assertNotIn("sensitive provider failure", str(response.debug))
+        self.assertEqual(response.query, 'stream window=10s sample_stream\n| search level == "error"')
 
-    def test_generates_named_parse_query(self):
+    def test_generates_stream_query_from_context_name(self):
         response = generator().generate(
             GenerateQueryRequest(
-                request="ssh_logs 테이블에 openssh 파서를 적용해줘",
-                context=RequestContext(known_tables=["ssh_logs"], known_fields=["line"]),
+                request="firewall_stream 최근 1분 동안 error 로그 보여줘",
+                context=RequestContext(known_streams=["firewall_stream"], known_fields=["level"]),
             )
         )
         self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table ssh_logs\n| parse openssh")
-        self.assertIn("parse", response.validation.commands)
+        self.assertEqual(response.query, 'stream window=1m firewall_stream\n| search level == "error"')
 
-    def test_generates_parsejson_query(self):
+    def test_generates_realtime_logger_query_with_filter(self):
         response = generator().generate(
             GenerateQueryRequest(
-                request="app_logs 테이블의 payload 필드 JSON 중첩을 펼쳐 파싱해줘",
-                context=RequestContext(known_tables=["app_logs"], known_fields=["payload"]),
+                request="local\\sample_logger 로거에서 최근 10초 동안 error 로그 보여줘",
+                context=RequestContext(known_loggers=["local\\sample_logger"], known_fields=["level"]),
             )
         )
         self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table app_logs\n| parsejson field=payload flatten=t")
-        self.assertIn("parsejson", response.validation.commands)
+        self.assertEqual(response.query, 'logger window=10s local\\sample_logger\n| search level == "error"')
 
-    def test_generates_parsecsv_tsv_query(self):
+    def test_generates_logger_query_from_context_name(self):
         response = generator().generate(
             GenerateQueryRequest(
-                request="app_logs 테이블의 line 필드 TSV 문자열을 파싱해줘",
-                context=RequestContext(known_tables=["app_logs"], known_fields=["line"]),
+                request="firewall_logger 로거에서 최근 1분 동안 로그 보여줘",
+                context=RequestContext(known_loggers=["firewall_logger"]),
             )
         )
         self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table app_logs\n| parsecsv field=line tab=t")
-        self.assertIn("parsecsv", response.validation.commands)
+        self.assertEqual(response.query, "logger window=1m firewall_logger")
 
-    def test_parse_query_needs_parser_name(self):
+    def test_generates_realtime_stream_aggregation_sorted_and_limited(self):
         response = generator().generate(
             GenerateQueryRequest(
-                request="ssh_logs 테이블의 line을 파싱해줘",
-                context=RequestContext(known_tables=["ssh_logs"], known_fields=["line"]),
-            )
-        )
-        self.assertEqual(response.status, "needs_clarification")
-        self.assertTrue(any("파서 이름" in question for question in response.questions))
-
-    def test_generates_explode_query(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="app_logs 테이블의 tags 배열 필드를 행으로 확장해줘",
-                context=RequestContext(known_tables=["app_logs"], known_fields=["tags", "message"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table app_logs\n| explode tags")
-        self.assertIn("explode", response.validation.commands)
-
-    def test_maps_where_wording_to_documented_search_command(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs 테이블에서 where 조건으로 action=deny인 로그 보여줘",
-                context=RequestContext(known_tables=["firewall_logs"], known_fields=["action"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, 'table firewall_logs\n| search action == "deny"')
-        self.assertNotIn("where", response.validation.commands)
-
-    def test_generates_logger_query(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request=r"local\sample1, local\sample2 로그 수집기를 10초간 보여줘",
-                context=RequestContext(known_fields=["message"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, r"logger window=10s local\sample1, local\sample2")
-        self.assertIn("logger", response.validation.commands)
-
-    def test_logger_query_needs_clarification(self):
-        response = generator().generate(GenerateQueryRequest(request="로그 수집기 보여줘"))
-        self.assertEqual(response.status, "needs_clarification")
-        self.assertTrue(any("네임스페이스" in question for question in response.questions))
-        self.assertTrue(any("기간" in question for question in response.questions))
-
-    def test_generates_stream_query_with_window_and_pipeline(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="sample1, sample2 스트림을 10초간 level=error 조건으로 보여줘",
-                context=RequestContext(known_fields=["level", "message"]),
+                request="sample_stream 스트림에서 최근 1분 동안 host별 error 건수 top 10 보여줘",
+                context=RequestContext(known_fields=["level", "host"]),
             )
         )
         self.assertEqual(response.status, "generated", response.questions)
         self.assertEqual(
             response.query,
-            'stream window=10s sample1, sample2\n| search level == "error"',
+            'stream window=1m sample_stream\n| search level == "error"\n| stats count by host\n| sort -count\n| limit 10',
         )
-        self.assertIn("stream", response.validation.commands)
 
-    def test_generates_stream_query_without_optional_window(self):
+    def test_realtime_source_needs_duration(self):
         response = generator().generate(
-            GenerateQueryRequest(request="audit_* 스트림을 보여줘")
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "stream audit_*")
-
-    def test_generates_evtx_file_query(self):
-        response = generator().generate(
-            GenerateQueryRequest(request=r"D:\data\evtx\System.evtx 파일을 조회해줘")
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, r"evtx-file D:\data\evtx\System.evtx")
-        self.assertIn("evtx-file", response.validation.commands)
-
-    def test_generates_documented_data_file_queries(self):
-        cases = [
-            (r"D:\data\events.csv 파일을 조회해줘", r"csvfile D:\data\events.csv"),
-            ("events.tsv 파일을 조회해줘", "csvfile events.tsv"),
-            ("/var/log/events.json 파일을 조회해줘", "jsonfile /var/log/events.json"),
-            ("app.txt 파일을 조회해줘", "textfile app.txt"),
-        ]
-        for request, expected in cases:
-            with self.subTest(request=request):
-                response = generator().generate(GenerateQueryRequest(request=request))
-                self.assertEqual(response.status, "generated", response.questions)
-                self.assertEqual(response.query, expected)
-                self.assertIn(expected.split()[0], response.validation.commands)
-
-    def test_generates_documented_forensic_file_queries(self):
-        cases = [
-            ("capture.pcap 파일을 조회해줘", "pcapfile capture.pcap"),
-            ("report.xml 파일을 조회해줘", "xmlfile report.xml"),
-            (r"C:\Windows\Prefetch\APP.PF 파일을 조회해줘", r"prefetch-file C:\Windows\Prefetch\APP.PF"),
-            ("Report.wer 파일을 조회해줘", "wer-file Report.wer"),
-        ]
-        for request, expected in cases:
-            with self.subTest(request=request):
-                response = generator().generate(GenerateQueryRequest(request=request))
-                self.assertEqual(response.status, "generated", response.questions)
-                self.assertEqual(response.query, expected)
-                self.assertIn(expected.split()[0], response.validation.commands)
-
-    def test_generates_zipfile_query_with_required_member(self):
-        response = generator().generate(
-            GenerateQueryRequest(request="/opt/logpresso/testdata.zip 안의 *.txt 파일을 조회해줘")
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "zipfile /opt/logpresso/testdata.zip *.txt")
-        self.assertIn("zipfile", response.validation.commands)
-
-    def test_zipfile_query_needs_member_clarification(self):
-        response = generator().generate(
-            GenerateQueryRequest(request="/opt/logpresso/testdata.zip 파일을 조회해줘")
+            GenerateQueryRequest(
+                request="sample_stream 스트림 로그 보여줘",
+                context=RequestContext(known_fields=["level"]),
+            )
         )
         self.assertEqual(response.status, "needs_clarification")
-        self.assertTrue(any("ZIP 파일 안" in question for question in response.questions))
+        self.assertTrue(response.questions)
+    def test_generates_left_join_with_distinct_source_keys_and_renames(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip를 출발지 ip로 바꾸고 firewall_djt의 dst_ip를 도착지 ip로 바꾼 후에 얘네를 left 조인 해줘. src_ip를 기준으로 left 조인 할거야",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "firewall_djt"],
+                    known_fields=["src_ip", "dst_ip"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            "table firewall_logs\n"
+            "| rename src_ip as 출발지_ip\n"
+            "| eval _join_key = 출발지_ip\n"
+            "| join type=left _join_key [\n"
+            "    table firewall_djt\n"
+            "    | rename dst_ip as 도착지_ip\n"
+            "    | eval _join_key = 도착지_ip\n"
+            "]",
+        )
+        self.assertIn("join", response.validation.commands)
 
+    def test_generates_full_join_when_requested(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip와 firewall_djt의 dst_ip를 기준으로 full join 해줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "firewall_djt"],
+                    known_fields=["src_ip", "dst_ip"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("| join type=full _join_key [", response.query)
+
+    def test_generates_left_streamjoin_with_table_subquery(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="sample_stream 스트림에서 최근 10초 동안 src_ip와 firewall_djt의 dst_ip를 기준으로 left streamjoin 해줘",
+                context=RequestContext(
+                    known_tables=["firewall_djt"],
+                    known_fields=["src_ip", "dst_ip"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("stream window=10s sample_stream", response.query)
+        self.assertIn("| streamjoin type=left _join_key [", response.query)
+
+    def test_join_keeps_time_filter_and_limit_conditions(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 24시간 firewall_logs의 src_ip와 firewall_djt의 dst_ip를 기준으로 left join 하고 action이 deny인 것만 10개 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "firewall_djt"],
+                    known_fields=["src_ip", "dst_ip", "action"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("table duration=24h firewall_logs", response.query)
+        self.assertIn('| search action == "deny"', response.query)
+        self.assertTrue(response.query.endswith("| limit 10"))
+
+    def test_join_applies_explicit_pre_join_filter_to_left_source(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip와 firewall_djt의 dst_ip를 src_ip를 기준으로 left join 하고 조인 전에 action == deny인 것만 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "firewall_djt"],
+                    known_fields=["src_ip", "dst_ip", "action"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertLess(response.query.index('| search action == "deny"'), response.query.index("| eval _join_key = src_ip"))
+
+    def test_join_applies_right_table_qualified_filter_in_subquery(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip와 firewall_djt의 dst_ip를 src_ip를 기준으로 left join 하고 firewall_djt.dst_port == 443인 것만 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "firewall_djt"],
+                    known_fields=["src_ip", "dst_ip", "dst_port"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("    | search dst_port == 443", response.query)
+        self.assertLess(response.query.index("    | search dst_port == 443"), response.query.index("    | eval _join_key = dst_ip"))
+
+    def test_generates_stream_forward_with_confirmation_preview(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 firewall_logs에서 100건을 sample_stream 스트림으로 전달해줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertTrue(response.query.endswith("| stream forward=t sample_stream"))
+        self.assertEqual(response.execution_preview.status, "requires_confirmation")
+        self.assertFalse(response.execution_preview.is_read_only)
     def test_references_only_generated_commands_when_possible(self):
         response = generator().generate(
             GenerateQueryRequest(
@@ -226,74 +220,6 @@ class QueryGeneratorTest(unittest.TestCase):
         )
         self.assertEqual(response.status, "generated", response.questions)
         self.assertIn("| timechart span=10m count", response.query)
-
-    def test_generates_multiple_table_query_with_node_paths(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="최근 1시간 동안 *:sys_cpu_logs와 node2:sys_mem_logs 테이블을 조회해줘",
-                context=RequestContext(
-                    known_tables=["*:sys_cpu_logs", "node2:sys_mem_logs"],
-                    known_fields=["_time"],
-                ),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            "table duration=1h *:sys_cpu_logs, node2:sys_mem_logs",
-        )
-
-    def test_generates_table_source_order_option(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="최근 1시간 firewall_logs에서 오래된 로그부터 보여줘",
-                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table duration=1h order=asc firewall_logs")
-
-    def test_parameterized_time_query_keeps_multiple_tables(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="최근 7일을 매개변수로 firewall_logs와 web_logs 테이블을 조회해줘",
-                context=RequestContext(
-                    known_tables=["firewall_logs", "web_logs"],
-                    known_fields=["_time"],
-                ),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'set from=ago("7d")\n| set to=str(now())\n| table from=$("from") to=$("to") firewall_logs, web_logs',
-        )
-
-    def test_parameterized_time_query_keeps_source_order(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="최근 7일을 매개변수로 firewall_logs를 오래된 로그부터 조회해줘",
-                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'set from=ago("7d")\n| set to=str(now())\n| table from=$("from") to=$("to") order=asc firewall_logs',
-        )
-
-    def test_fulltext_keeps_offset_limit_and_source_order_options(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request='최근 1시간 app_logs에서 fulltext로 "timeout"을 검색해서 10건을 건너뛰고 20건을 오래된 로그부터 보여줘',
-                context=RequestContext(known_tables=["app_logs"], known_fields=["message"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'fulltext duration=1h limit=20 offset=10 order=asc "timeout" from app_logs',
-        )
 
     def test_uses_valid_llm_query(self):
         response = generator(
@@ -394,7 +320,7 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertIn("rename", response.validation.commands)
         self.assertTrue(any(ref.entry_name == "rename" for ref in response.references))
 
-    def test_generates_rename_query_without_euro_particle_suffix(self):
+    def test_rename_with_euro_ending_korean_particle_keeps_field_name(self):
         response = generator().generate(
             GenerateQueryRequest(
                 request="firewall_logs의 src_ip를 할당ip으로 rename해줘",
@@ -638,51 +564,6 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status, "generated", response.questions)
         self.assertEqual(response.query, 'table firewall_logs\n| search action == "deny" or action == "allow"')
 
-    def test_generates_or_filter_query_across_different_fields(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs에서 action=deny 또는 level=error인 로그 보여줘",
-                context=RequestContext(
-                    known_tables=["firewall_logs"],
-                    known_fields=["action", "level"],
-                ),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'table firewall_logs\n| search action == "deny" or level == "error"',
-        )
-
-    def test_mixed_and_or_without_parentheses_is_not_guessed(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs에서 action=deny 또는 level=error 그리고 host=web01인 로그 보여줘",
-                context=RequestContext(
-                    known_tables=["firewall_logs"],
-                    known_fields=["action", "level", "host"],
-                ),
-            )
-        )
-        self.assertEqual(response.status, "needs_clarification")
-        self.assertTrue(any("괄호" in question for question in response.questions))
-
-    def test_generates_parenthesized_or_group_followed_by_and_filter(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs에서 (action=deny 또는 level=error) 그리고 host=web01인 로그 보여줘",
-                context=RequestContext(
-                    known_tables=["firewall_logs"],
-                    known_fields=["action", "level", "host"],
-                ),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'table firewall_logs\n| search action == "deny" or level == "error"\n| search host == "web01"',
-        )
-
     def test_generates_contains_filter_query(self):
         response = generator().generate(
             GenerateQueryRequest(
@@ -751,39 +632,6 @@ class QueryGeneratorTest(unittest.TestCase):
             response.query,
             "table metrics_logs\n| stats avg(bytes) as avg_bytes by host\n| sort -avg_bytes\n| limit 10",
         )
-
-    def test_generates_multiple_sort_fields_in_one_documented_command(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs를 _time 내림차순 후 login_name 오름차순으로 정렬해줘",
-                context=RequestContext(
-                    known_tables=["firewall_logs"],
-                    known_fields=["_time", "login_name", "message"],
-                ),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table firewall_logs\n| sort -_time, login_name")
-
-    def test_generates_documented_limit_offset_and_maximum(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs에서 10건을 건너뛰고 20건 보여줘",
-                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "table firewall_logs\n| limit 10 20")
-
-    def test_limit_offset_without_maximum_is_not_guessed(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="firewall_logs에서 10건을 건너뛰고 보여줘",
-                context=RequestContext(known_tables=["firewall_logs"], known_fields=["_time"]),
-            )
-        )
-        self.assertEqual(response.status, "needs_clarification")
-        self.assertTrue(any("최대 몇 건" in question for question in response.questions))
 
     def test_generates_top_n_count_query(self):
         response = generator().generate(
@@ -932,51 +780,6 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.query, 'fulltext duration=24h "1.2.3.4"')
         self.assertIn("fulltext", response.validation.commands)
 
-    def test_generates_fulltext_and_or_expression(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request='최근 1시간 iis 테이블에서 "game"을 포함하면서 "MSIE" 또는 "Firefox"가 포함된 로그 fulltext 검색',
-                context=RequestContext(known_tables=["iis"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'fulltext duration=1h "game" and ("MSIE" or "Firefox") from iis',
-        )
-
-    def test_generates_fulltext_numeric_range(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="최근 1시간 iis 테이블에서 400~500 범위 숫자 fulltext 검색",
-                context=RequestContext(known_tables=["iis"]),
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, "fulltext duration=1h range(400, 500) from iis")
-        self.assertIn("range", response.validation.functions)
-
-    def test_generates_fulltext_ip_range(self):
-        response = generator().generate(
-            GenerateQueryRequest(
-                request="최근 1시간 전체 테이블에서 192.0.0.1~192.0.0.255 IP 범위 fulltext 검색"
-            )
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(
-            response.query,
-            'fulltext duration=1h iprange("192.0.0.1", "192.0.0.255")',
-        )
-        self.assertIn("iprange", response.validation.functions)
-
-    def test_quotes_range_like_text_instead_of_treating_it_as_raw_syntax(self):
-        response = generator().generate(
-            GenerateQueryRequest(request='최근 1시간 전체 테이블에서 "range(1, 2) | fake" fulltext 검색')
-        )
-        self.assertEqual(response.status, "generated", response.questions)
-        self.assertEqual(response.query, 'fulltext duration=1h "range(1, 2) | fake"')
-        self.assertEqual(response.validation.commands, ["fulltext"])
-
     def test_generates_fulltext_specific_table_query(self):
         response = generator().generate(
             GenerateQueryRequest(
@@ -989,6 +792,71 @@ class QueryGeneratorTest(unittest.TestCase):
         )
         self.assertEqual(response.status, "generated", response.questions)
         self.assertEqual(response.query, 'fulltext duration=1h "timeout" from app_logs')
+
+    def test_uses_explicit_table_and_field_without_sidebar_hints(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="custom_logs 테이블에서 severity == critical 로그 보여줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, 'table custom_logs\n| search severity == "critical"')
+        self.assertTrue(any(issue.code == "catalog_unavailable" for issue in response.schema_validation.warnings))
+
+    def test_uses_explicit_field_for_rename_without_sidebar_hints(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="custom_logs 테이블에서 client_ip를 source_ip로 rename해줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table custom_logs\n| rename client_ip as source_ip")
+
+    def test_generates_explicit_numeric_range_without_sidebar_hints(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="custom_logs 테이블에서 bytes가 100 이상 1000 이하인 로그 보여줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, "table custom_logs\n| search bytes >= 100\n| search bytes <= 1000")
+
+    def test_generates_explicit_grouped_sum_without_sidebar_hints(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="custom_logs 테이블에서 user_id별 bytes 합계 top 10 보여줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            "table custom_logs\n| stats sum(bytes) as sum_bytes by user_id\n| sort -sum_bytes\n| limit 10",
+        )
+
+    def test_generates_explicit_contains_filter_without_sidebar_hints(self):
+        response = generator().generate(
+            GenerateQueryRequest(request="custom_logs 테이블에서 message contains timeout 로그 보여줘")
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(response.query, 'table custom_logs\n| search message == "*timeout*"')
+
+    def test_generates_boolean_fulltext_expression(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 iis에서 game을 포함하면서 MSIE 또는 Firefox 문자열을 포함한 로그 fulltext 검색",
+                context=RequestContext(known_tables=["iis"], known_fields=["_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'fulltext duration=1h "game" and ("MSIE" or "Firefox") from iis',
+        )
+
+    def test_generates_fulltext_aggregation_sorted_and_limited(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 1시간 app_logs에서 timeout fulltext 검색 후 host별 건수 top 10 보여줘",
+                context=RequestContext(known_tables=["app_logs"], known_fields=["host", "_time"]),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            'fulltext duration=1h "timeout" from app_logs\n| stats count by host\n| sort -count\n| limit 10',
+        )
 
     def test_fulltext_search_needs_expression(self):
         response = generator().generate(

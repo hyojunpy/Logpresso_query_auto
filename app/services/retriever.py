@@ -22,7 +22,7 @@ class Retriever:
 
     def command_exists(self, command: str) -> bool:
         names = self.index.command_names()
-        fallback = {"table", "fulltext", "search", "stats", "rollup", "timechart", "sort", "limit", "set", "setq"}
+        fallback = {"table", "fulltext", "search", "stats", "rollup", "timechart", "sort", "limit", "set", "setq", "join", "streamjoin"}
         return command in names or command in fallback
 
     def options_for_command(self, command: str) -> set[str]:
@@ -31,6 +31,8 @@ class Retriever:
             "table": {"duration", "from", "to", "limit", "offset", "order"},
             "fulltext": {"duration", "from", "to", "limit", "offset", "order", "tt"},
             "timechart": {"span", "offset", "parallel"},
+            "join": {"type"},
+            "streamjoin": {"type", "timeout"},
             "rollup": {"label", "parallel"},
             "stream": {"forward", "window"},
             "sort": {"limit"},

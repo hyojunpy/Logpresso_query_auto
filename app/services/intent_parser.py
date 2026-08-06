@@ -9,6 +9,7 @@ from app.models.request import (
     GenerateQueryRequest,
     QueryIntent,
     RenameOperation,
+    JoinSpec,
     SortCondition,
     TimeRange,
 )
@@ -39,47 +40,30 @@ class IntentParser:
     def parse(self, payload: GenerateQueryRequest) -> QueryIntent:
         text = payload.request.strip()
         context = payload.context
+        known_fields = list(dict.fromkeys([*context.known_fields, *self._explicit_fields(text)]))
         intent = QueryIntent(objective=text)
         intent.time_range = self._time_range(text)
-        intent.source_order = self._source_order(text)
         intent.query_type = "adhoc"
-        intent.source_type = self._source_type(text)
-        intent.tables = self._tables(
-            text,
-            context.known_tables,
-            allow_single_default=intent.source_type == "table",
-        ) if intent.source_type in {"table", "fulltext"} else []
+        intent.source_type = self._source_type(text, context.known_streams)
+        intent.tables = self._tables(text, context.known_tables, allow_single_default=intent.source_type != "fulltext")
         intent.fulltext_expression = self._fulltext_expression(text) if intent.source_type == "fulltext" else None
         intent.use_parameterized_time_range = self._looks_like_parameterized_time_range(text)
-        intent.streams = self._streams(text) if intent.source_type == "stream" else []
-        intent.stream_window = self._realtime_window(text) if intent.source_type == "stream" else None
-        intent.loggers = self._loggers(text) if intent.source_type == "logger" else []
-        intent.logger_window = self._realtime_window(text) if intent.source_type == "logger" else None
-        if intent.source_type == "file":
-            intent.file_path = self._file_path(text)
-            intent.file_command = self._file_command(intent.file_path)
-            intent.archive_member = self._archive_member(text) if intent.file_command == "zipfile" else None
-        intent.selected_fields = self._selected_fields(text, context.known_fields)
-        intent.computed_fields = self._computed_fields(text, context.known_fields)
-        intent.parser_name = self._parser_name(text)
-        intent.structured_parser = self._structured_parser(text)
-        intent.structured_parser_field = self._structured_parser_field(text) if intent.structured_parser else None
-        intent.parser_flatten = intent.structured_parser == "parsejson" and any(
-            word in text.lower() for word in ("flatten", "중첩을 펼", "중첩까지 펼", "배열을 펼")
-        )
-        intent.parser_tab = intent.structured_parser == "parsecsv" and any(
-            word in text.lower() for word in ("tsv", "tab=t", "탭 구분")
-        )
-        intent.explode_fields = self._explode_fields(text, context.known_fields)
-        intent.renames = self._renames(text, context.known_fields)
-        intent.aggregations = self._aggregations(text, context.known_fields)
-        intent.group_by = self._group_by(text, context.known_fields)
+        intent.streams = self._streams(text, context.known_streams) if intent.source_type == "stream" else []
+        intent.forward_streams = self._streams(text) if self._looks_like_stream_forward(text) else []
+        intent.loggers = self._loggers(text, context.known_loggers) if intent.source_type == "logger" else []
+        intent.selected_fields = self._selected_fields(text, known_fields)
+        intent.computed_fields = self._computed_fields(text, known_fields)
+        intent.renames = self._renames(text, known_fields)
+        intent.join = self._join(text, intent.tables, known_fields, intent.source_type, intent.streams, intent.loggers)
+        intent.aggregations = self._aggregations(text, known_fields)
+        intent.group_by = self._group_by(text, known_fields)
         intent.aggregation_command = "rollup" if self._looks_like_ratio(text) and intent.group_by else "stats"
         intent.final_aggregations = self._final_aggregations(text, intent.group_by)
         intent.post_filters = self._post_filters(text, intent.aggregations)
-        intent.filters = self._filters(text, context.known_fields, intent.post_filters)
-        intent.sort = self._sort(text, intent.aggregations, context.known_fields)
-        intent.offset = self._offset(text)
+        intent.filters = self._filters(text, known_fields, intent.post_filters)
+        if intent.join:
+            intent.filters = self._partition_join_filters(text, intent.join, intent.filters)
+        intent.sort = self._sort(text, intent.aggregations)
         intent.limit = self._limit(text)
 
         if "실시간" in text:
@@ -91,22 +75,105 @@ class IntentParser:
         if intent.source_type == "logger":
             intent.query_type = "realtime"
 
-        self._collect_missing_information(intent, text, context.known_fields)
+        self._collect_missing_information(intent, text, known_fields)
         return intent
 
-    def _source_type(self, text: str) -> str:
-        if "스트림" in text:
+    @staticmethod
+    def _partition_join_filters(text: str, join: JoinSpec, filters: list[FilterCondition]) -> list[FilterCondition]:
+        post_join_filters: list[FilterCondition] = []
+        lowered = text.lower()
+        left_before_join = "조인 전" in text or "before join" in lowered
+        for filter_ in filters:
+            if f"{join.right_table}.{filter_.field}" in text:
+                join.right_filters.append(filter_)
+            elif f"{join.left_table}.{filter_.field}" in text or left_before_join:
+                join.left_filters.append(filter_)
+            else:
+                post_join_filters.append(filter_)
+        return post_join_filters
+
+    @staticmethod
+    def _explicit_fields(text: str) -> list[str]:
+        """Collect only identifiers explicitly paired with field-oriented query syntax."""
+        patterns = (
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:별|별로)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:==|!=|>=|<=|>|<)",
+            r"\b(?:avg|sum|max|min)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:의\s*)?(?:평균|합계|최대|최소|avg|sum|max|min)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s+contains\b",
+            r"\brename\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:을|를)?\s*[A-Za-z_][A-Za-z0-9_]*\s*(?:으로|로)\s*(?:rename|바꾸|변경)",
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:을|를)?\s*기준",
+        )
+        fields: list[str] = []
+        for pattern in patterns:
+            for field in re.findall(pattern, text, flags=re.IGNORECASE):
+                if field.lower() not in {"ip"} and field not in fields:
+                    fields.append(field)
+        return fields
+
+    def _join(self, text: str, tables: list[str], known_fields: list[str], source_type: str, streams: list[str], loggers: list[str]) -> JoinSpec | None:
+        if not any(word in text.lower() for word in ("join", "조인")):
+            return None
+        realtime_source = streams[0] if source_type == "stream" and streams else (loggers[0] if source_type == "logger" and loggers else None)
+        if len(tables) < 2 and not (realtime_source and tables):
+            return None
+        mentioned_fields = [field for field in known_fields if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", text)]
+        key_match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)?\s*(?:기준|키)", text)
+        left_key = key_match.group(1) if key_match and key_match.group(1) in known_fields else (mentioned_fields[0] if mentioned_fields else "")
+        right_key = next((field for field in mentioned_fields if field != left_key), "")
+        if not left_key or not right_key:
+            return None
+        lowered = text.lower()
+        join_type = "inner"
+        if "leftonly" in lowered or "left only" in lowered or "왼쪽 전용" in text:
+            join_type = "leftonly"
+        elif "rightonly" in lowered or "right only" in lowered or "오른쪽 전용" in text:
+            join_type = "rightonly"
+        elif "full" in lowered or "전체 조인" in text:
+            join_type = "full"
+        elif "right" in lowered or "오른쪽 조인" in text:
+            join_type = "right"
+        elif "left" in lowered or "왼쪽 조인" in text:
+            join_type = "left"
+        command = "streamjoin" if "streamjoin" in lowered or "스트림 조인" in text else "join"
+        if command == "streamjoin" and join_type not in {"inner", "left", "leftonly"}:
+            return None
+        return JoinSpec(
+            command=command,
+            join_type=join_type,
+            left_source_type=source_type if realtime_source else "table",
+            left_table=realtime_source or tables[0],
+            right_table=tables[0] if realtime_source else tables[1],
+            left_key=left_key,
+            right_key=right_key,
+            left_rename=self._rename_target(text, left_key),
+            right_rename=self._rename_target(text, right_key),
+        )
+
+    @staticmethod
+    def _rename_target(text: str, field: str) -> str | None:
+        match = re.search(rf"{re.escape(field)}\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z_ ]*?)\s*(?:으로|(?<!으)로)\s*(?:바꾸|바꾼|변경|rename)", text, flags=re.IGNORECASE)
+        if not match:
+            return None
+        return re.sub(r"\s+", "_", match.group(1).strip())
+
+    def _source_type(self, text: str, known_streams: list[str] | None = None) -> str:
+        lowered = text.lower()
+        if "logger" in lowered or "로거" in text or "로그 수집기" in text:
+            return "logger"
+        if self._looks_like_stream_forward(text):
+            return "table"
+        if ("스트림" in text or "stream" in lowered) and not self._looks_like_stream_forward(text):
+            return "stream"
+        if any(stream in text for stream in (known_streams or [])):
             return "stream"
         if self._looks_like_fulltext(text):
             return "fulltext"
-        if any(word in text.lower() for word in ("logger", "로거", "로그 수집기")):
-            return "logger"
-        if self._file_path(text) or "파일" in text:
-            return "file"
         return "table"
 
     def _time_range(self, text: str) -> TimeRange | None:
-        compact_units = {"분": "m", "시간": "h", "시": "h", "일": "d", "주": "w"}
+        compact_units = {"초": "s", "분": "m", "시간": "h", "시": "h", "일": "d", "주": "w"}
         explicit_datetime = self._explicit_datetime_range(text)
         if explicit_datetime:
             return explicit_datetime
@@ -119,7 +186,7 @@ class IntentParser:
         relative_absolute = self._relative_absolute_range(text)
         if relative_absolute:
             return relative_absolute
-        match = re.search(r"(?:최근|지난)\s*(\d+)\s*(분|시간|시|일|주)", text)
+        match = re.search(r"(?:최근|지난)\s*(\d+)\s*(초|분|시간|시|일|주)", text)
         if match:
             return TimeRange(mode="duration", duration=f"{match.group(1)}{compact_units[match.group(2)]}")
         relative = {
@@ -134,14 +201,6 @@ class IntentParser:
         for phrase, duration in relative.items():
             if phrase in text:
                 return TimeRange(mode="duration", duration=duration)
-        return None
-
-    def _source_order(self, text: str) -> str | None:
-        lowered = text.lower()
-        if any(phrase in lowered for phrase in ("오래된 로그부터", "오래된 순서", "과거 로그부터", "과거부터", "order=asc")):
-            return "asc"
-        if any(phrase in lowered for phrase in ("최신 로그부터", "최신순", "최근 로그부터", "order=desc")):
-            return "desc"
         return None
 
     def _explicit_datetime_range(self, text: str) -> TimeRange | None:
@@ -260,10 +319,7 @@ class IntentParser:
 
     def _tables(self, text: str, known_tables: list[str], allow_single_default: bool = True) -> list[str]:
         tables = [table for table in known_tables if table in text]
-        explicit = re.findall(
-            r"([A-Za-z_*][A-Za-z0-9_*.-]*(?::[A-Za-z_][A-Za-z0-9_*.-]*)?)\s*(?:에서|의|테이블)",
-            text,
-        )
+        explicit = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:에서|의|테이블)", text)
         for table in explicit:
             if table not in tables and table not in {"rename", "as"}:
                 tables.append(table)
@@ -277,18 +333,18 @@ class IntentParser:
         return tables
 
     def _fulltext_expression(self, text: str) -> str | None:
-        ip_range = re.search(
-            r"\b((?:\d{1,3}\.){3}\d{1,3})\s*(?:~|부터|에서)\s*((?:\d{1,3}\.){3}\d{1,3})\b",
+        boolean_match = re.search(
+            r"([A-Za-z0-9_.:/-]+)\s*(?:을|를)?\s*포함하면서\s*([A-Za-z0-9_.:/-]+)\s*(?:또는|혹은|or)\s*([A-Za-z0-9_.:/-]+)\s*(?:문자열)?\s*(?:을|를)?\s*포함",
             text,
+            flags=re.IGNORECASE,
         )
-        if ip_range:
-            return f'iprange("{ip_range.group(1)}", "{ip_range.group(2)}")'
-        numeric_range = re.search(r"(?<![\d.])(-?\d+(?:\.\d+)?)\s*(?:~|부터|에서)\s*(-?\d+(?:\.\d+)?)(?![\d.])", text)
-        if numeric_range and any(word in text for word in ("범위", "사이", "range")):
-            return f"range({numeric_range.group(1)}, {numeric_range.group(2)})"
-        boolean_expression = self._fulltext_boolean_expression(text)
-        if boolean_expression:
-            return boolean_expression
+        if boolean_match:
+            first, second, third = boolean_match.groups()
+            return f'"{first}" and ("{second}" or "{third}")'
+        quoted_values = re.findall(r"['\"]([^'\"]+)['\"]", text)
+        if len(quoted_values) >= 2 and any(word in text.lower() for word in (" and ", " or ", "그리고", "또는", "혹은")):
+            operator = " or " if any(word in text.lower() for word in (" or ", "또는", "혹은")) else " and "
+            return operator.join(f'"{value.strip()}"' for value in quoted_values)
         ip = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
         if ip:
             return ip.group(0)
@@ -298,6 +354,7 @@ class IntentParser:
         patterns = [
             r"([A-Za-z0-9_.:/-]+)\s*(?:가|이)?\s*(?:포함된|포함한|포함되어|포함)",
             r"([A-Za-z0-9_.:/-]+)\s*(?:문자열|텍스트)?\s*(?:검색|찾아)",
+            r"([A-Za-z0-9_.:/-]+)\s+fulltext\s*(?:검색|찾아)?",
         ]
         ignored = {"로그", "테이블", "전체", "모든", "검색", "fulltext"}
         for pattern in patterns:
@@ -306,153 +363,23 @@ class IntentParser:
                     return candidate
         return None
 
-    def _fulltext_boolean_expression(self, text: str) -> str | None:
-        quoted_terms = [term.strip() for term in re.findall(r"['\"]([^'\"]+)['\"]", text) if term.strip()]
+    def _streams(self, text: str, known_streams: list[str] | None = None) -> list[str]:
+        configured = [stream for stream in (known_streams or []) if stream in text]
+        if configured:
+            return configured
+        return re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:스트림|stream)", text, flags=re.IGNORECASE)
+
+    @staticmethod
+    def _looks_like_stream_forward(text: str) -> bool:
         lowered = text.lower()
-        has_or = any(word in lowered for word in (" 또는 ", " 혹은 ", " or "))
-        has_and = any(word in lowered for word in (" 그리고 ", " 및 ", " and ", "포함하면서", "포함하고"))
-        if len(quoted_terms) >= 3 and has_and and has_or:
-            return (
-                f"{self._quote_fulltext_term(quoted_terms[0])} and "
-                f"({self._quote_fulltext_term(quoted_terms[1])} or {self._quote_fulltext_term(quoted_terms[2])})"
-            )
-        if len(quoted_terms) >= 2 and (has_and or has_or):
-            operator = "or" if has_or and not has_and else "and"
-            return f" {operator} ".join(self._quote_fulltext_term(term) for term in quoted_terms)
+        return ("stream" in lowered or "스트림" in text) and any(word in text for word in ("전달", "전송", "보내"))
 
-        token = r"[가-힣A-Za-z0-9_.:/-]+"
-        combined = re.search(
-            rf"({token})\s*(?:을|를)?\s*포함(?:하면서|하고).*?({token})\s*(?:또는|혹은|or)\s*({token})",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if combined:
-            first, second, third = combined.groups()
-            return (
-                f"{self._quote_fulltext_term(first)} and "
-                f"({self._quote_fulltext_term(second)} or {self._quote_fulltext_term(third)})"
-            )
-        alternative = re.search(
-            rf"({token})\s*(?:또는|혹은|or)\s*({token}).*?(?:포함|검색|찾아)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if alternative:
-            return " or ".join(self._quote_fulltext_term(term) for term in alternative.groups())
-        conjunction = re.search(
-            rf"({token})\s*(?:와|과|그리고|및|and)\s*({token}).*?(?:모두\s*)?(?:포함|검색|찾아)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if conjunction:
-            return " and ".join(self._quote_fulltext_term(term) for term in conjunction.groups())
-        return None
-
-    def _quote_fulltext_term(self, term: str) -> str:
-        escaped = term.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-
-    def _streams(self, text: str) -> list[str]:
-        match = re.search(
-            r"([A-Za-z_][A-Za-z0-9_*.-]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_*.-]*)*)\s*스트림",
-            text,
-        )
-        return [item.strip() for item in match.group(1).split(",")] if match else []
-
-    def _parser_name(self, text: str) -> str | None:
-        explicit = re.search(r"\bparse\s+([A-Za-z_][A-Za-z0-9_.-]*)\b", text, flags=re.IGNORECASE)
-        if explicit:
-            return explicit.group(1)
-        patterns = [
-            r"\b([A-Za-z_][A-Za-z0-9_.-]*)\s*파서(?:로|를\s*사용(?:해서|하여)?|를\s*적용)",
-            r"\b([A-Za-z_][A-Za-z0-9_.-]*)\s*parser(?:로|를\s*사용(?:해서|하여)?)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None
-
-    def _structured_parser(self, text: str) -> str | None:
-        lowered = text.lower()
-        if not self._looks_like_parse(text):
-            return None
-        if "parsejson" in lowered or "json" in lowered:
-            return "parsejson"
-        if "parsecsv" in lowered or "csv" in lowered or "tsv" in lowered:
-            return "parsecsv"
-        return None
-
-    def _structured_parser_field(self, text: str) -> str | None:
-        explicit = re.search(r"\bfield\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\b", text, flags=re.IGNORECASE)
-        if explicit:
-            return explicit.group(1)
-        match = re.search(
-            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*필드(?:에\s*저장된|의)?\s*(?:JSON|CSV|TSV)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        return match.group(1) if match else None
-
-    def _explode_fields(self, text: str, known_fields: list[str]) -> list[str]:
-        explicit = re.findall(r"\bexplode\s+([A-Za-z_][A-Za-z0-9_]*)\b", text, flags=re.IGNORECASE)
-        fields = [field for field in explicit if not known_fields or field in known_fields]
-        if any(word in text.lower() for word in ("explode", "배열", "행으로", "원소별")):
-            for field in known_fields:
-                if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", text) and field not in fields:
-                    fields.append(field)
-        return fields
-
-    def _loggers(self, text: str) -> list[str]:
-        return list(dict.fromkeys(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*\\[A-Za-z_][A-Za-z0-9_*.-]*)\b", text)))
-
-    def _realtime_window(self, text: str) -> str | None:
-        units = {"초": "s", "분": "m", "시간": "h", "일": "d", "주": "w"}
-        match = re.search(r"(\d+)\s*(초|분|시간|일|주)\s*(?:간|동안)?", text)
-        if match:
-            return f"{match.group(1)}{units[match.group(2)]}"
-        match = re.search(r"\bwindow\s*=\s*(\d+(?:y|mon|w|d|h|m|s))\b", text, flags=re.IGNORECASE)
-        return match.group(1).lower() if match else None
-
-    def _file_path(self, text: str) -> str | None:
-        extensions = r"evtx|eml|lnk|csv|tsv|json|txt|pcap|xml|pf|wer|zip"
-        quoted = re.search(rf"['\"]([^'\"]+\.(?:{extensions}))['\"]", text, flags=re.IGNORECASE)
-        if quoted:
-            return quoted.group(1)
-        match = re.search(
-            rf"(?<![A-Za-z0-9_.-])((?:[A-Za-z]:\\|/)?[^\s'\"]+\.(?:{extensions}))\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-        return match.group(1) if match else None
-
-    def _file_command(self, path: str | None) -> str | None:
-        if not path:
-            return None
-        extension_commands = {
-            ".evtx": "evtx-file",
-            ".eml": "eml-file",
-            ".lnk": "lnk-file",
-            ".csv": "csvfile",
-            ".tsv": "csvfile",
-            ".json": "jsonfile",
-            ".txt": "textfile",
-            ".pcap": "pcapfile",
-            ".xml": "xmlfile",
-            ".pf": "prefetch-file",
-            ".wer": "wer-file",
-            ".zip": "zipfile",
-        }
-        lowered = path.lower()
-        return next((command for extension, command in extension_commands.items() if lowered.endswith(extension)), None)
-
-    def _archive_member(self, text: str) -> str | None:
-        match = re.search(
-            r"\.zip['\"]?\s*(?:파일\s*)?(?:안의|내의|에서)\s*['\"]?([^\s'\"]+)['\"]?",
-            text,
-            flags=re.IGNORECASE,
-        )
-        return match.group(1) if match else None
+    @staticmethod
+    def _loggers(text: str, known_loggers: list[str]) -> list[str]:
+        configured = [logger for logger in known_loggers if logger in text]
+        if configured:
+            return configured
+        return re.findall(r"\b([A-Za-z0-9_.-]+\\[A-Za-z0-9_.-]+)\b", text)
 
     def _filters(
         self,
@@ -467,13 +394,11 @@ class IntentParser:
             if field:
                 filters.append(FilterCondition(field=field, value="root"))
         if not has_explicit_string_filter and any(word in text for word in DENY_WORDS):
-            field = self._labeled_filter_field(text, ("차단", "deny", "blocked"), known_fields)
-            field = field or self._field_or_missing(known_fields, "action")
+            field = self._field_or_missing(known_fields, "action")
             if field:
                 filters.append(FilterCondition(field=field, value="deny"))
         if not has_explicit_string_filter and any(word in text for word in ERROR_WORDS):
-            field = self._labeled_filter_field(text, ERROR_WORDS, known_fields)
-            field = field or self._field_or_missing(known_fields, "level", "severity", "message", "line")
+            field = self._field_or_missing(known_fields, "level", "severity", "message", "line")
             if field:
                 value = "ERROR" if field in {"message", "line"} else "error"
                 filters.append(FilterCondition(field=field, value=value))
@@ -486,23 +411,6 @@ class IntentParser:
         filters.extend(self._string_comparison_filters(text, known_fields))
         filters.extend(self._contains_filters(text, known_fields))
         return self._without_post_filters(self._unique_filters(filters), post_filters or [])
-
-    def _labeled_filter_field(
-        self,
-        text: str,
-        labels: tuple[str, ...],
-        known_fields: list[str],
-    ) -> str | None:
-        label_pattern = "|".join(re.escape(label) for label in labels)
-        match = re.search(
-            rf"(?:{label_pattern})\s*필드(?:는|은|로|:)?\s*([A-Za-z_][A-Za-z0-9_]*)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if not match:
-            return None
-        field = match.group(1)
-        return field if not known_fields or field in known_fields else None
 
     def _comparison_filters(self, text: str, known_fields: list[str]) -> list[FilterCondition]:
         operator_map = {
@@ -526,6 +434,10 @@ class IntentParser:
         symbolic_pattern = rf"({expression})\s*(>=|<=|>|<|==|=)\s*({number})"
         for left, op, value in re.findall(symbolic_pattern, text):
             self._append_numeric_filter(filters, left, op, value, known_fields, operator_map)
+        range_pattern = rf"({expression})\s*(?:가|은|는)?\s*({number})\s*(이상|초과)\s*(?:부터|에서)?\s*({number})\s*(이하|미만)"
+        for left, lower, lower_op, upper, upper_op in re.findall(range_pattern, text):
+            self._append_numeric_filter(filters, left, lower_op, lower, known_fields, operator_map)
+            self._append_numeric_filter(filters, left, upper_op, upper, known_fields, operator_map)
         return filters
 
     def _append_numeric_filter(
@@ -566,18 +478,16 @@ class IntentParser:
             return []
         field = r"[A-Za-z_][A-Za-z0-9_]*"
         value = r"[가-힣A-Za-z0-9_.:/-]+"
-        symbolic_value = r"[가-힣A-Za-z0-9_.:/-]+?"
-        symbolic_boundary = r"(?=\s|(?:인|아닌)(?:\s|$)|[,.)]|$)"
         filters: list[FilterCondition] = []
         negative_patterns = [
             rf"({field})\s*(?:가|이|은|는)?\s*({value}?)\s*(?:이\s*)?아닌",
-            rf"({field})\s*!=\s*({symbolic_value}){symbolic_boundary}",
+            rf"({field})\s*!=\s*({value})",
         ]
         positive_patterns = [
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*인(?!\s*아닌)",
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*(?:이거나|거나)",
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*(?:같은|와\s*같은|과\s*같은)",
-            rf"({field})\s*(?:==|=)\s*({symbolic_value}){symbolic_boundary}",
+            rf"({field})\s*(?:==|=)\s*({value})",
         ]
         for left, first, second in re.findall(
             rf"({field})\s*(?:가|이|은|는)\s*({value}?)\s*(?:또는|혹은|or)\s*({value}?)\s*인",
@@ -597,29 +507,13 @@ class IntentParser:
                 ):
                     continue
                 self._append_string_filter(filters, left, "==", raw_value, known_fields)
-        has_or = any(word in text for word in ("또는", "혹은", "이거나", "거나", " or "))
-        has_and = any(word in text for word in ("그리고", "이면서", "동시에", " 및 ", " and "))
-        if has_or and not has_and:
-            for filter_ in filters[1:]:
-                filter_.conjunction = "or"
-        elif has_or:
-            for group in self._parenthesized_or_groups(text):
-                indexes = [
-                    index
-                    for index, filter_ in enumerate(filters)
-                    if re.search(rf"(?<![A-Za-z0-9_]){re.escape(filter_.field)}(?![A-Za-z0-9_])", group)
-                ]
-                for index in indexes[1:]:
-                    filters[index].conjunction = "or"
+        if any(word in text for word in ("또는", "혹은", "이거나", "거나", " or ")):
+            last_field = None
+            for filter_ in filters:
+                if last_field == filter_.field:
+                    filter_.conjunction = "or"
+                last_field = filter_.field
         return filters
-
-    def _parenthesized_or_groups(self, text: str) -> list[str]:
-        groups = re.findall(r"\(([^()]*)\)", text)
-        return [
-            group
-            for group in groups
-            if any(word in group.lower() for word in ("또는", "혹은", "이거나", "거나", " or "))
-        ]
 
     def _contains_filters(self, text: str, known_fields: list[str]) -> list[FilterCondition]:
         if not known_fields:
@@ -643,6 +537,11 @@ class IntentParser:
                         value_type="string",
                     )
                 )
+        for left, raw_value in re.findall(rf"({field})\s+contains\s+({value})", text, flags=re.IGNORECASE):
+            if left in known_fields:
+                filters.append(
+                    FilterCondition(field=left, operator="==", value=f"*{raw_value}*", value_type="string")
+                )
         return filters
 
     def _append_string_filter(
@@ -656,6 +555,7 @@ class IntentParser:
     ) -> None:
         if field not in known_fields:
             return
+        value = re.sub(r"^([A-Za-z0-9_.:/-]+)(?:인|은|는|이|가|을|를)$", r"\1", value)
         filters.append(
             FilterCondition(
                 field=field,
@@ -684,8 +584,8 @@ class IntentParser:
         if not any(word in text.lower() for word in ("rename", "이름 변경", "이름변경", "필드명 변경")):
             return []
         patterns = [
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*?)\s*(?:으로|로)\s*rename",
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*?)\s*(?:으로|로)\s*(?:이름\s*변경|필드명\s*변경)",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*)\s*(?:으로|(?<!으)로)\s*rename",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)\s*([가-힣A-Za-z_][가-힣A-Za-z0-9_]*)\s*(?:으로|(?<!으)로)\s*(?:이름\s*변경|필드명\s*변경)",
             r"rename\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:as\s+)?([가-힣A-Za-z_][가-힣A-Za-z0-9_]*)",
         ]
         renames: list[RenameOperation] = []
@@ -727,8 +627,8 @@ class IntentParser:
         if not self._looks_like_computation(text):
             return []
         patterns = [
-            r"([A-Za-z_][A-Za-z0-9_]*(?:\s*[+\-*/]\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*(?:를|을)\s*([A-Za-z_][A-Za-z0-9_]*?)\s*(?:으로|로)\s*(?:계산|eval|생성|만들)",
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:와|과|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:의\s*)?(?:합계|합|더한\s*값)\s*(?:를|을)?\s*([A-Za-z_][A-Za-z0-9_]*?)\s*(?:으로|로)?\s*(?:계산|생성|만들)?",
+            r"([A-Za-z_][A-Za-z0-9_]*(?:\s*[+\-*/]\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*(?:를|을)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:으로|(?<!으)로)\s*(?:계산|eval|생성|만들)",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:와|과|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:의\s*)?(?:합계|합|더한\s*값)\s*(?:를|을)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:로|으로)?\s*(?:계산|생성|만들)?",
         ]
         computed = []
         for field_expr, target in re.findall(patterns[0], text, flags=re.IGNORECASE):
@@ -750,9 +650,9 @@ class IntentParser:
         return any(cue in text for cue in cues)
 
     def _expression_fields_known(self, expression: str, known_fields: list[str]) -> bool:
-        if not known_fields:
-            return False
         identifiers = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", expression)
+        if not known_fields:
+            return bool(identifiers)
         return all(identifier in known_fields for identifier in identifiers)
 
     def _field_or_missing(self, known_fields: list[str], *preferred: str) -> str | None:
@@ -909,31 +809,7 @@ class IntentParser:
             return [field] if field else []
         return []
 
-    def _sort(
-        self,
-        text: str,
-        aggregations: list[Aggregation],
-        known_fields: list[str],
-    ) -> list[SortCondition]:
-        candidates = list(dict.fromkeys(
-            known_fields
-            + [aggregation.alias for aggregation in aggregations if aggregation.alias]
-            + ["count"]
-        ))
-        if candidates:
-            field_pattern = "|".join(re.escape(field) for field in sorted(candidates, key=len, reverse=True))
-            explicit = re.findall(
-                rf"(?<![A-Za-z0-9_])({field_pattern})(?![A-Za-z0-9_])\s*(?:을|를|기준으로)?\s*"
-                r"(내림차순|오름차순|높은 순|낮은 순|많은 순|적은 순)",
-                text,
-                flags=re.IGNORECASE,
-            )
-            if explicit:
-                descending = {"내림차순", "높은 순", "많은 순"}
-                return [
-                    SortCondition(field=field, direction="desc" if direction in descending else "asc")
-                    for field, direction in explicit
-                ]
+    def _sort(self, text: str, aggregations: list[Aggregation]) -> list[SortCondition]:
         sort_field = self._sort_field(text, aggregations)
         lowered = text.lower()
         if any(word in lowered for word in ("top", "상위", "많은 순", "높은 순", "큰 순", "내림차순", "많이", "가장 많이", "많이 나온")):
@@ -954,63 +830,37 @@ class IntentParser:
         top_bottom = re.search(r"(?:top|bottom|상위|하위)\s*(\d+)", text, flags=re.IGNORECASE)
         if top_bottom:
             return int(top_bottom.group(1))
-        paged = re.search(
-            r"\d+\s*(?:개|건|줄|행)\s*(?:을|를)?\s*(?:건너뛰고|건너뛴\s*후|제외하고)\s*"
-            r"(\d+)\s*(?:개|건|줄|행)",
-            text,
-        )
-        if paged:
-            return int(paged.group(1))
-        if self._offset(text) is not None:
-            return None
         match = re.search(r"(\d+)\s*(?:개|건|줄|행)", text)
         return int(match.group(1)) if match else None
 
-    def _offset(self, text: str) -> int | None:
-        match = re.search(
-            r"(\d+)\s*(?:개|건|줄|행)\s*(?:을|를)?\s*(?:건너뛰고|건너뛴\s*후|제외하고)",
-            text,
-        )
-        return int(match.group(1)) if match else None
-
     def _collect_missing_information(self, intent: QueryIntent, text: str, known_fields: list[str]) -> None:
+        join_filters = (intent.join.left_filters + intent.join.right_filters) if intent.join else []
+        all_filters = intent.filters + intent.post_filters + join_filters
         if intent.source_type == "table" and not intent.tables:
             intent.missing_information.append("조회할 로그프레소 테이블 이름")
         if intent.source_type == "stream" and not intent.streams:
             intent.missing_information.append("조회할 스트림 이름")
         if intent.source_type == "logger" and not intent.loggers:
-            intent.missing_information.append("조회할 로그 수집기 이름")
-        if intent.source_type == "logger" and not intent.logger_window:
+            intent.missing_information.append("조회할 logger 이름")
+        if intent.source_type in {"stream", "logger"} and not (intent.time_range and intent.time_range.duration):
             intent.missing_information.append("실시간 조회 기간")
-        if intent.source_type == "file" and not intent.file_path:
-            intent.missing_information.append("조회할 파일 경로")
-        if intent.source_type == "file" and intent.file_path and not intent.file_command:
-            intent.missing_information.append("파일 형식에 맞는 명령")
-        if intent.source_type == "file" and intent.file_path and any(char.isspace() for char in intent.file_path):
-            intent.missing_information.append("공백 없는 파일 경로")
-        if intent.file_command == "zipfile" and not intent.archive_member:
-            intent.missing_information.append("ZIP 내부에서 조회할 파일 이름")
         if intent.source_type == "fulltext" and not intent.fulltext_expression:
             intent.missing_information.append("전체 텍스트 검색어")
-        if intent.source_type != "fulltext" and any(word in text for word in ERROR_WORDS + DENY_WORDS) and not intent.filters:
+        if intent.source_type != "fulltext" and any(word in text for word in ERROR_WORDS + DENY_WORDS) and not all_filters:
             intent.missing_information.append("필터에 사용할 필드명과 값")
-        numeric_filters = intent.filters + intent.post_filters
+        numeric_filters = all_filters
         if self._looks_like_comparison(text) and not any(filter_.value_type == "number" for filter_ in numeric_filters):
             intent.missing_information.append("비교 조건에 사용할 필드명과 값")
-        if intent.source_type != "fulltext" and self._looks_like_string_filter(text) and not intent.filters:
+        if intent.source_type != "fulltext" and self._looks_like_string_filter(text) and not all_filters:
             intent.missing_information.append("필터에 사용할 필드명과 값")
-        if intent.source_type != "fulltext" and self._has_mixed_boolean_filter(text):
-            intent.missing_information.append("복합 필터 괄호 구조")
-        if any(word in text.lower() for word in ("rename", "이름 변경", "이름변경", "필드명 변경")) and not intent.renames:
+        if any(word in text.lower() for word in ("join", "조인")) and not intent.join:
+            intent.missing_information.append("left/right 조인할 두 테이블과 각 조인 키 필드")
+        if any(word in text.lower() for word in ("rename", "이름 변경", "이름변경", "필드명 변경")) and not intent.renames and not intent.join:
             intent.missing_information.append("변경할 원본 필드명과 새 필드명")
         if self._looks_like_field_selection(text) and not intent.selected_fields:
             intent.missing_information.append("출력할 필드명")
         if self._looks_like_computation(text) and not intent.computed_fields and not intent.aggregations:
             intent.missing_information.append("계산할 표현식과 새 필드명")
-        if self._looks_like_parse(text) and not intent.parser_name and not intent.structured_parser:
-            intent.missing_information.append("적용할 파서 이름")
-        if self._looks_like_explode(text) and not intent.explode_fields:
-            intent.missing_information.append("행으로 확장할 배열 필드명")
         if self._looks_like_metric_aggregation(text) and not intent.aggregations:
             intent.missing_information.append("집계할 필드명")
         if intent.use_parameterized_time_range and not intent.time_range:
@@ -1027,8 +877,6 @@ class IntentParser:
             intent.missing_information.append("조회 기간")
         if not intent.limit and not intent.time_range and any(word in text for word in ("전체", "모든", "대량", "제한 없이")):
             intent.missing_information.append("출력 건수 제한")
-        if intent.offset is not None and intent.limit is None:
-            intent.missing_information.append("건너뛴 이후 출력 건수")
         if known_fields and intent.aggregations and any(word in text for word in ("IP별", "사용자별")) and not intent.group_by:
             intent.missing_information.append("그룹 기준 필드명")
         if self._looks_like_ratio(text) and not intent.group_by:
@@ -1037,32 +885,8 @@ class IntentParser:
             intent.missing_information.append("그룹 기준 필드명")
         intent.missing_information = list(dict.fromkeys(intent.missing_information))
 
-    def _has_mixed_boolean_filter(self, text: str) -> bool:
-        lowered = text.lower()
-        has_or = any(word in lowered for word in ("또는", "혹은", "이거나", "거나", " or "))
-        has_and = any(word in lowered for word in ("그리고", "이면서", "동시에", " 및 ", " and "))
-        if not (has_or and has_and):
-            return False
-        if text.count("(") != text.count(")"):
-            return True
-        groups = self._parenthesized_or_groups(text)
-        if not groups:
-            return True
-        if any(any(word in group.lower() for word in ("그리고", "이면서", "동시에", " 및 ", " and ")) for group in groups):
-            return True
-        outside = text
-        for group in groups:
-            outside = outside.replace(f"({group})", "")
-        return any(word in outside.lower() for word in ("또는", "혹은", "이거나", "거나", " or "))
-
     def _looks_like_comparison(self, text: str) -> bool:
         return any(word in text for word in ("이상", "초과", "이하", "미만", ">=", "<=", ">", "<"))
-
-    def _looks_like_parse(self, text: str) -> bool:
-        return bool(re.search(r"\bparse\b", text, flags=re.IGNORECASE) or any(word in text for word in ("파서", "파싱")))
-
-    def _looks_like_explode(self, text: str) -> bool:
-        return any(word in text.lower() for word in ("explode", "배열을 펼", "배열 필드", "행으로 확장", "원소별 행"))
 
     def _looks_like_string_filter(self, text: str) -> bool:
         return bool(

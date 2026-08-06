@@ -2,11 +2,14 @@ from fastapi import APIRouter, Body, Query
 from pathlib import Path
 
 from app.core.config import settings
-from app.models.request import GenerateQueryRequest, ValidateQueryRequest
-from app.models.response import GenerateQueryResponse, ValidationResult
+from app.models.request import GenerateQueryRequest, ValidateQueryRequest, RequestContext
+from app.models.response import GenerateQueryResponse, QueryAnalysisResponse, ValidationResult
 from app.services.indexer import DocumentIndex
 from app.services.query_generator import QueryGenerator
 from app.services.query_validator import QueryValidator
+from app.services.catalog_service import CatalogService
+from app.services.execution_preview import ExecutionPreviewService
+from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.retriever import Retriever
 
 router = APIRouter()
@@ -65,7 +68,28 @@ def generate_query(payload: GenerateQueryRequest = Body(..., openapi_examples=GE
 
 @router.post("/query/validate", response_model=ValidationResult)
 def validate_query(payload: ValidateQueryRequest = Body(..., openapi_examples=VALIDATE_EXAMPLES)):
-    return QueryValidator(_retriever()).validate(payload.query)
+    syntax = QueryValidator(_retriever()).validate(payload.query)
+    context = payload.context.model_copy(update={"catalog": payload.catalog or payload.context.catalog})
+    schema = CatalogService(settings.catalog_path).validate_query(payload.query, context)
+    syntax.errors.extend(schema.errors)
+    syntax.warnings.extend(schema.warnings)
+    syntax.valid = not syntax.errors
+    return syntax
+
+
+@router.post("/query/analyze", response_model=QueryAnalysisResponse)
+def analyze_query(payload: ValidateQueryRequest):
+    syntax = QueryValidator(_retriever()).validate(payload.query)
+    context = payload.context.model_copy(update={"catalog": payload.catalog or payload.context.catalog})
+    schema = CatalogService(settings.catalog_path).validate_query(payload.query, context)
+    combined = syntax.model_copy(deep=True)
+    combined.errors.extend(schema.errors)
+    combined.warnings.extend(schema.warnings)
+    combined.compatibility_notes.extend(schema.compatibility_notes)
+    combined.valid = not combined.errors
+    quality = QueryQualityAnalyzer().analyze(payload.query, combined)
+    preview = ExecutionPreviewService().build(payload.query if combined.valid else None, combined, quality)
+    return QueryAnalysisResponse(validation=combined, schema_validation=schema, quality=quality, execution_preview=preview)
 
 
 @router.get("/commands/search")

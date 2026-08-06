@@ -5,7 +5,7 @@ import re
 
 from app.core.config import settings
 from app.models.request import GenerateQueryRequest, QueryIntent
-from app.models.response import GenerateQueryResponse, QueryExplanation
+from app.models.response import ExecutionPreview, GenerateQueryResponse, QueryExplanation
 from app.services.citation_service import references_for_query_parts, references_from_results
 from app.services.intent_parser import IntentParser
 from app.services.llm.base import LLMProvider
@@ -14,6 +14,9 @@ from app.services.llm.ollama_provider import OllamaProvider
 from app.services.llm.openai_provider import OpenAIProvider
 from app.services.query_validator import QueryValidator
 from app.services.retriever import Retriever
+from app.services.catalog_service import CatalogService
+from app.services.execution_preview import ExecutionPreviewService
+from app.services.quality_analyzer import QueryQualityAnalyzer
 
 
 class QueryGenerator:
@@ -21,11 +24,14 @@ class QueryGenerator:
         self.retriever = retriever
         self.intent_parser = IntentParser()
         self.validator = QueryValidator(retriever)
+        self.catalog = CatalogService(settings.catalog_path)
+        self.quality_analyzer = QueryQualityAnalyzer()
+        self.execution_preview = ExecutionPreviewService()
         self.llm = llm or self._provider()
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         intent = self.intent_parser.parse(payload)
-        search_text = f"{payload.request} table logger stream fulltext evtx-file eml-file lnk-file csvfile jsonfile textfile pcapfile xmlfile prefetch-file wer-file zipfile search parse parsejson parsecsv explode stats rollup timechart eval fields rename first last set setq"
+        search_text = f"{payload.request} table logger stream fulltext search stats rollup timechart eval fields rename join first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:
             return GenerateQueryResponse(
@@ -33,6 +39,10 @@ class QueryGenerator:
                 query=None,
                 intent=intent,
                 questions=[],
+                execution_preview=ExecutionPreview(
+                    status="unsupported", is_read_only=None, risk_level="high",
+                    blocked_reasons=["문서 인덱스 결과가 없어 쿼리를 생성할 수 없습니다."],
+                ),
                 debug={"reason": "문서 인덱스에 검색 결과가 없습니다. /documents/reindex를 실행하십시오."},
             )
         if intent.missing_information:
@@ -41,44 +51,38 @@ class QueryGenerator:
                 query=None,
                 questions=self._questions(intent),
                 intent=intent,
+                execution_preview=ExecutionPreview(
+                    status="not_requested", is_read_only=None, risk_level="low",
+                    confirmation_message="확인 질문에 답한 뒤 쿼리 생성과 검증을 진행하세요.",
+                ),
                 references=references_from_results(results[:3], "확인 질문을 만들기 위해 관련 문법을 검색했습니다."),
                 debug={"retrieved": len(results)},
             )
 
         prompt = self._generation_prompt(payload, intent, results)
-        try:
-            llm_data = self.llm.generate_json(prompt, results)
-        except Exception:
-            llm_data = {
-                "status": "error",
-                "error_type": "provider_exception",
-                "message": "LLM provider failed unexpectedly",
-            }
+        llm_data = self.llm.generate_json(prompt, results)
         llm_query = self._query_from_llm(llm_data)
         query = llm_query or self._template_query(intent)
-        validation = self.validator.validate(query)
+        validation = self._validate(query, payload)
         repair_attempts = 0
         while not validation.valid and repair_attempts < 2:
             repair_attempts += 1
-            try:
-                repaired_data = self.llm.repair_json(
-                    self._repair_prompt(query, validation.errors, results),
-                    query,
-                    validation.errors,
-                    results,
-                )
-            except Exception:
-                break
+            repaired_data = self.llm.repair_json(
+                self._repair_prompt(query, validation.errors, results),
+                query,
+                validation.errors,
+                results,
+            )
             repaired = self._query_from_llm(repaired_data)
             if not repaired or repaired == query:
                 break
-            repaired_validation = self.validator.validate(repaired)
+            repaired_validation = self._validate(repaired, payload)
             query = repaired
             validation = repaired_validation
         used_template_fallback = False
         if not validation.valid and llm_query:
             template_query = self._safe_template_query(intent)
-            template_validation = self.validator.validate(template_query)
+            template_validation = self._validate(template_query, payload)
             if template_validation.valid:
                 query = template_query
                 validation = template_validation
@@ -88,11 +92,16 @@ class QueryGenerator:
             query,
             "생성된 쿼리에 실제 사용된 명령어의 문서 근거입니다.",
         )
+        quality = self.quality_analyzer.analyze(query, validation)
+        preview = self.execution_preview.build(query if validation.valid else None, validation, quality)
         return GenerateQueryResponse(
             status="generated" if validation.valid else "unsupported",
             query=query if validation.valid else None,
             intent=intent,
             validation=validation,
+            schema_validation=self.catalog.validate_query(query, payload.context),
+            quality=quality,
+            execution_preview=preview,
             explanation=self._explain(query),
             references=references or references_from_results(results, "생성된 쿼리의 명령어와 옵션 근거입니다."),
             assumptions=intent.assumptions,
@@ -101,12 +110,20 @@ class QueryGenerator:
                 "retrieved": len(results),
                 "reference_mode": "commands" if references else "retrieval_fallback",
                 "llm_status": llm_data.get("status"),
-                "llm_error_type": llm_data.get("error_type"),
                 "llm_used": bool(llm_query) and not used_template_fallback,
                 "template_fallback": used_template_fallback,
                 "repair_attempts": repair_attempts,
             },
         )
+
+    def _validate(self, query: str, payload: GenerateQueryRequest):
+        syntax = self.validator.validate(query)
+        schema = self.catalog.validate_query(query, payload.context)
+        syntax.errors.extend(schema.errors)
+        syntax.warnings.extend(schema.warnings)
+        syntax.compatibility_notes.extend(schema.compatibility_notes)
+        syntax.valid = not syntax.errors
+        return syntax
 
     def _safe_template_query(self, intent: QueryIntent) -> str:
         try:
@@ -115,35 +132,29 @@ class QueryGenerator:
             return ""
 
     def _template_query(self, intent: QueryIntent) -> str:
+        if intent.join:
+            return self._join_query(intent.join, intent)
+        if intent.source_type == "logger":
+            return self._realtime_query("logger", intent.loggers, intent)
+        if intent.source_type == "stream":
+            return self._realtime_query("stream", intent.streams, intent)
         if intent.source_type == "fulltext":
             return self._fulltext_query(intent)
-        if intent.source_type == "logger":
-            return self._logger_query(intent)
-        if intent.source_type == "stream":
-            return self._stream_query(intent)
-        if intent.source_type == "file":
-            return self._file_query(intent)
         if not intent.tables:
             raise ValueError("table is required to generate a table query")
         if intent.use_parameterized_time_range:
             return self._parameterized_table_query(intent)
+        table = intent.tables[0]
         first = "table"
         if intent.time_range and intent.time_range.duration:
             first += f" duration={intent.time_range.duration}"
         elif intent.time_range and intent.time_range.from_ and intent.time_range.to:
             first += f" from={intent.time_range.from_} to={intent.time_range.to}"
-        if intent.source_order:
-            first += f" order={intent.source_order}"
-        first += f" {', '.join(intent.tables)}"
+        first += f" {table}"
         lines = [first]
-        if intent.parser_name:
-            lines.append(f"| parse {intent.parser_name}")
-        lines.extend(self._structured_parser_lines(intent))
         lines.extend(self._filter_lines(intent))
         for computed in intent.computed_fields:
             lines.append(f"| eval {computed.name} = {computed.expression}")
-        for field in intent.explode_fields:
-            lines.append(f"| explode {field}")
         for rename in intent.renames:
             lines.append(f"| rename {rename.field} as {rename.new_name}")
         if intent.selected_fields:
@@ -160,71 +171,90 @@ class QueryGenerator:
         if intent.final_aggregations:
             lines.append(f"| stats {self._format_aggregation_list(intent.final_aggregations)}")
         lines.extend(self._post_filter_lines(intent))
-        if intent.sort:
-            sort_fields = [
-                f"{'-' if sort.direction == 'desc' else ''}{sort.field}"
-                for sort in intent.sort
-            ]
-            lines.append(f"| sort {', '.join(sort_fields)}")
+        for sort in intent.sort:
+            prefix = "-" if sort.direction == "desc" else ""
+            lines.append(f"| sort {prefix}{sort.field}")
         if intent.limit:
-            offset = f"{intent.offset} " if intent.offset is not None else ""
-            lines.append(f"| limit {offset}{intent.limit}")
+            lines.append(f"| limit {intent.limit}")
+        if intent.forward_streams:
+            lines.append(f"| stream forward=t {', '.join(intent.forward_streams)}")
         return "\n".join(lines)
 
-    def _logger_query(self, intent: QueryIntent) -> str:
-        if not intent.loggers or not intent.logger_window:
-            raise ValueError("logger name and window are required to generate a logger query")
-        lines = [f"logger window={intent.logger_window} {', '.join(intent.loggers)}"]
-        if intent.parser_name:
-            lines.append(f"| parse {intent.parser_name}")
-        lines.extend(self._structured_parser_lines(intent))
+    def _realtime_query(self, command: str, sources: list[str], intent: QueryIntent) -> str:
+        if not sources:
+            raise ValueError(f"{command} source is required")
+        if not intent.time_range or not intent.time_range.duration:
+            raise ValueError("duration is required for a realtime query")
+        lines = [f"{command} window={intent.time_range.duration} {', '.join(sources)}"]
         lines.extend(self._filter_lines(intent))
-        lines.extend(f"| explode {field}" for field in intent.explode_fields)
+        for computed in intent.computed_fields:
+            lines.append(f"| eval {computed.name} = {computed.expression}")
+        for rename in intent.renames:
+            lines.append(f"| rename {rename.field} as {rename.new_name}")
+        if intent.selected_fields:
+            lines.append(f"| fields {', '.join(intent.selected_fields)}")
+        if intent.aggregations:
+            if self._time_span(intent):
+                lines.append(f"| timechart span={self._time_span(intent)} {self._format_aggregations(intent)}")
+            elif intent.group_by:
+                lines.append(f"| {intent.aggregation_command} {self._format_aggregations(intent)} by {', '.join(intent.group_by)}")
+            else:
+                lines.append(f"| stats {self._format_aggregations(intent)}")
+        if intent.final_aggregations:
+            lines.append(f"| stats {self._format_aggregation_list(intent.final_aggregations)}")
+        lines.extend(self._post_filter_lines(intent))
+        for sort in intent.sort:
+            prefix = "-" if sort.direction == "desc" else ""
+            lines.append(f"| sort {prefix}{sort.field}")
+        if intent.limit:
+            lines.append(f"| limit {intent.limit}")
         return "\n".join(lines)
 
-    def _stream_query(self, intent: QueryIntent) -> str:
-        if not intent.streams:
-            raise ValueError("stream name is required to generate a stream query")
-        command = "stream"
-        if intent.stream_window:
-            command += f" window={intent.stream_window}"
-        lines = [f"{command} {', '.join(intent.streams)}"]
-        if intent.parser_name:
-            lines.append(f"| parse {intent.parser_name}")
-        lines.extend(self._structured_parser_lines(intent))
+    def _join_query(self, join, intent: QueryIntent) -> str:
+        left_name = join.left_rename or join.left_key
+        right_name = join.right_rename or join.right_key
+        if join.left_source_type in {"stream", "logger"}:
+            if not intent.time_range or not intent.time_range.duration:
+                raise ValueError("duration is required for a realtime join")
+            lines = [f"{join.left_source_type} window={intent.time_range.duration} {join.left_table}"]
+        else:
+            left_source = "table"
+            if intent.time_range and intent.time_range.duration:
+                left_source += f" duration={intent.time_range.duration}"
+            elif intent.time_range and intent.time_range.from_ and intent.time_range.to:
+                left_source += f" from={intent.time_range.from_} to={intent.time_range.to}"
+            lines = [f"{left_source} {join.left_table}"]
+        lines.extend(self._filter_lines_for(join.left_filters))
+        if join.left_rename:
+            lines.append(f"| rename {join.left_key} as {join.left_rename}")
+        lines.append(f"| eval {join.helper_key} = {left_name}")
+        lines.extend([
+            f"| {join.command} type={join.join_type} {join.helper_key} [",
+            f"    table {join.right_table}",
+        ])
+        if join.right_rename:
+            lines.append(f"    | rename {join.right_key} as {join.right_rename}")
+        lines.extend(f"    {line}" for line in self._filter_lines_for(join.right_filters))
+        lines.extend([
+            f"    | eval {join.helper_key} = {right_name}",
+            "]",
+        ])
         lines.extend(self._filter_lines(intent))
-        lines.extend(f"| explode {field}" for field in intent.explode_fields)
+        for computed in intent.computed_fields:
+            lines.append(f"| eval {computed.name} = {computed.expression}")
+        if intent.selected_fields:
+            lines.append(f"| fields {', '.join(intent.selected_fields)}")
+        if intent.aggregations:
+            if intent.group_by:
+                lines.append(f"| {intent.aggregation_command} {self._format_aggregations(intent)} by {', '.join(intent.group_by)}")
+            else:
+                lines.append(f"| stats {self._format_aggregations(intent)}")
+        for sort in intent.sort:
+            prefix = "-" if sort.direction == "desc" else ""
+            lines.append(f"| sort {prefix}{sort.field}")
+        if intent.limit:
+            lines.append(f"| limit {intent.limit}")
         return "\n".join(lines)
-
-    def _file_query(self, intent: QueryIntent) -> str:
-        if not intent.file_command or not intent.file_path:
-            raise ValueError("documented file command and path are required to generate a file query")
-        source = f"{intent.file_command} {intent.file_path}"
-        if intent.file_command == "zipfile":
-            if not intent.archive_member:
-                raise ValueError("archive member is required to generate a zipfile query")
-            source += f" {intent.archive_member}"
-        lines = [source]
-        if intent.parser_name:
-            lines.append(f"| parse {intent.parser_name}")
-        lines.extend(self._structured_parser_lines(intent))
-        lines.extend(self._filter_lines(intent))
-        lines.extend(f"| explode {field}" for field in intent.explode_fields)
-        return "\n".join(lines)
-
-    def _structured_parser_lines(self, intent: QueryIntent) -> list[str]:
-        if not intent.structured_parser:
-            return []
-        command = intent.structured_parser
-        options: list[str] = []
-        if intent.structured_parser_field:
-            options.append(f"field={intent.structured_parser_field}")
-        if intent.parser_flatten:
-            options.append("flatten=t")
-        if intent.parser_tab:
-            options.append("tab=t")
-        suffix = f" {' '.join(options)}" if options else ""
-        return [f"| {command}{suffix}"]
 
     def _parameterized_table_query(self, intent: QueryIntent) -> str:
         if not intent.tables:
@@ -234,9 +264,7 @@ class QueryGenerator:
         lines = [
             f'set from=ago("{intent.time_range.duration}")',
             "| set to=str(now())",
-            f'| table from=$("from") to=$("to")'
-            f'{f" order={intent.source_order}" if intent.source_order else ""}'
-            f' {", ".join(intent.tables)}',
+            f'| table from=$("from") to=$("to") {intent.tables[0]}',
         ]
         return "\n".join(lines)
 
@@ -248,16 +276,33 @@ class QueryGenerator:
             command += f" duration={intent.time_range.duration}"
         elif intent.time_range and intent.time_range.from_ and intent.time_range.to:
             command += f" from={self._fulltext_time(intent.time_range.from_)} to={self._fulltext_time(intent.time_range.to)}"
-        if intent.limit:
+        if intent.limit and not intent.aggregations:
             command += f" limit={intent.limit}"
-        if intent.offset is not None:
-            command += f" offset={intent.offset}"
-        if intent.source_order:
-            command += f" order={intent.source_order}"
-        command += f" {self._format_fulltext_expression(intent.fulltext_expression)}"
+        command += f" {self._quote_fulltext_expression(intent.fulltext_expression)}"
         if intent.tables:
             command += f" from {', '.join(intent.tables)}"
-        return command
+        lines = [command]
+        lines.extend(self._filter_lines(intent))
+        for computed in intent.computed_fields:
+            lines.append(f"| eval {computed.name} = {computed.expression}")
+        for rename in intent.renames:
+            lines.append(f"| rename {rename.field} as {rename.new_name}")
+        if intent.selected_fields:
+            lines.append(f"| fields {', '.join(intent.selected_fields)}")
+        if intent.aggregations:
+            if self._time_span(intent):
+                lines.append(f"| timechart span={self._time_span(intent)} {self._format_aggregations(intent)}")
+            elif intent.group_by:
+                lines.append(f"| {intent.aggregation_command} {self._format_aggregations(intent)} by {', '.join(intent.group_by)}")
+            else:
+                lines.append(f"| stats {self._format_aggregations(intent)}")
+        lines.extend(self._post_filter_lines(intent))
+        for sort in intent.sort:
+            prefix = "-" if sort.direction == "desc" else ""
+            lines.append(f"| sort {prefix}{sort.field}")
+        if intent.limit and intent.aggregations:
+            lines.append(f"| limit {intent.limit}")
+        return "\n".join(lines)
 
     def _post_filter_lines(self, intent: QueryIntent) -> list[str]:
         lines: list[str] = []
@@ -266,9 +311,12 @@ class QueryGenerator:
         return lines
 
     def _filter_lines(self, intent: QueryIntent) -> list[str]:
+        return self._filter_lines_for(intent.filters)
+
+    def _filter_lines_for(self, filters) -> list[str]:
         lines: list[str] = []
         group = []
-        for filter_ in intent.filters:
+        for filter_ in filters:
             if filter_.conjunction == "or" and group:
                 group.append(filter_)
                 continue
@@ -323,21 +371,12 @@ class QueryGenerator:
         mapping = {
             "조회할 로그프레소 테이블 이름": "조회할 로그프레소 테이블 이름은 무엇인가요?",
             "조회할 스트림 이름": "조회할 스트림 이름은 무엇인가요?",
-            "조회할 로그 수집기 이름": "조회할 로그 수집기 이름을 네임스페이스와 함께 알려주세요. 예: local\\sample1",
-            "실시간 조회 기간": "로그 수집기를 실시간으로 조회할 기간은 얼마인가요? 예: 10초",
-            "조회할 파일 경로": "조회할 파일의 전체 경로는 무엇인가요?",
-            "파일 형식에 맞는 명령": "파일 형식을 확인할 수 없습니다. 지원할 파일 종류와 경로를 알려주세요.",
-            "공백 없는 파일 경로": "문서에서 공백 포함 경로의 인용 문법을 확인하지 못했습니다. 공백이 없는 경로를 알려주세요.",
-            "ZIP 내부에서 조회할 파일 이름": "ZIP 파일 안에서 조회할 텍스트 파일 이름이나 와일드카드 패턴을 알려주세요. 예: iis.txt 또는 *.txt",
-            "적용할 파서 이름": "적용할 로그프레소 파서 이름은 무엇인가요? 예: openssh",
-            "행으로 확장할 배열 필드명": "배열 원소마다 행으로 확장할 필드명은 무엇인가요? 예: tags",
             "필터에 사용할 필드명과 값": "필터에 사용할 필드명과 값은 무엇인가요?",
             "비교 조건에 사용할 필드명과 값": "비교 조건에 사용할 필드명과 값은 무엇인가요? 예: kernel + user가 80 이상",
             "IP 집계에 사용할 필드명": "IP 집계에 사용할 필드명은 무엇인가요? 예: src_ip",
             "사용자 집계에 사용할 필드명": "사용자 집계에 사용할 필드명은 무엇인가요? 예: login_name",
             "조회 기간": "조회 기간은 어떻게 지정할까요? 예: 최근 24시간, 지난 7일",
             "출력 건수 제한": "출력 건수 제한은 몇 건으로 할까요?",
-            "건너뛴 이후 출력 건수": "지정한 건수를 건너뛴 뒤 최대 몇 건을 출력할까요?",
             "그룹 기준 필드명": "그룹 기준으로 사용할 필드명은 무엇인가요?",
             "변경할 원본 필드명과 새 필드명": "변경할 원본 필드명과 새 필드명은 무엇인가요? 예: src_ip를 할당ip로",
             "출력할 필드명": "출력할 필드명은 무엇인가요? 예: src_ip, action",
@@ -346,7 +385,9 @@ class QueryGenerator:
             "대표 로그로 출력할 필드명": "대표 로그로 출력할 필드명은 무엇인가요? 예: line 또는 message",
             "전체 텍스트 검색어": "전체 텍스트로 검색할 문자열이나 IP는 무엇인가요? 예: 1.2.3.4",
             "매개변수로 지정할 조회 기간": "매개변수로 지정할 조회 기간은 무엇인가요? 예: 최근 7일",
-            "복합 필터 괄호 구조": "AND와 OR를 함께 사용할 때 적용 순서를 괄호로 알려주세요. 예: (action=deny 또는 level=error) 그리고 host=web01",
+            "left/right 조인할 두 테이블과 각 조인 키 필드": "조인할 두 테이블과 왼쪽/오른쪽 조인 키를 알려주세요. 예: firewall_logs.src_ip와 firewall_djt.dst_ip",
+            "조회할 logger 이름": "조회할 logger 이름을 알려주세요. 예: local\\sample_logger",
+            "실시간 조회 기간": "실시간 조회 기간을 알려주세요. 예: 최근 10초 또는 최근 5분",
         }
         return [mapping[item] for item in intent.missing_information if item in mapping] or [
             "쿼리 생성을 위해 부족한 조건을 알려주세요."
@@ -358,20 +399,10 @@ class QueryGenerator:
         return f'"{filter_.value}"'
 
     def _quote_fulltext_expression(self, expression: str) -> str:
+        if expression.startswith('"') and any(operator in expression.lower() for operator in (" and ", " or ")):
+            return expression
         escaped = expression.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
-
-    def _format_fulltext_expression(self, expression: str) -> str:
-        number = r"-?\d+(?:\.\d+)?"
-        ipv4 = r"(?:\d{1,3}\.){3}\d{1,3}"
-        if re.fullmatch(rf"range\({number},\s*{number}\)", expression):
-            return expression
-        if re.fullmatch(rf'iprange\("{ipv4}",\s*"{ipv4}"\)', expression):
-            return expression
-        boolean_tokens = re.sub(r'"(?:[^"\\]|\\.)*"|\band\b|\bor\b|[()\s]', "", expression)
-        if not boolean_tokens and re.search(r'"', expression):
-            return expression
-        return self._quote_fulltext_expression(expression)
 
     def _fulltext_time(self, value: str) -> str:
         digits = re.sub(r"\D", "", value)
@@ -440,23 +471,10 @@ class QueryGenerator:
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 테이블과 조회 기간으로 원본 로그를 읽습니다."))
             elif line.startswith("fulltext"):
                 explanations.append(QueryExplanation(query_part=line, reason="지정한 문자열 또는 IP를 전체 텍스트 검색 문법으로 조회합니다."))
-            elif line.startswith("logger"):
-                explanations.append(QueryExplanation(query_part=line, reason="지정한 로그 수집기의 데이터를 정해진 기간 동안 실시간으로 조회합니다."))
-            elif line.startswith("stream"):
-                explanations.append(QueryExplanation(query_part=line, reason="지정한 스트림에서 실시간 데이터를 수신합니다."))
-            elif re.match(
-                r"^(?:(?:evtx|eml|lnk|prefetch|wer)-file|csvfile|jsonfile|textfile|pcapfile|xmlfile|zipfile)\b",
-                line,
-            ):
-                explanations.append(QueryExplanation(query_part=line, reason="파일 형식에 맞는 문서 기반 명령으로 파일 내용을 조회합니다."))
             elif line.startswith("| search"):
                 explanations.append(QueryExplanation(query_part=line, reason="사용자 요청에서 추출한 필터 조건을 적용합니다."))
             elif line.startswith("| eval"):
                 explanations.append(QueryExplanation(query_part=line, reason="요청한 계산식을 새 필드로 생성합니다."))
-            elif line.startswith("| parse"):
-                explanations.append(QueryExplanation(query_part=line, reason="문서에 정의된 파싱 명령으로 문자열을 구조화된 필드로 변환합니다."))
-            elif line.startswith("| explode"):
-                explanations.append(QueryExplanation(query_part=line, reason="배열 필드의 각 원소를 개별 행으로 확장합니다."))
             elif line.startswith("| rename"):
                 explanations.append(QueryExplanation(query_part=line, reason="요청한 원본 필드명을 새 표시 필드명으로 변경합니다."))
             elif line.startswith("| fields"):

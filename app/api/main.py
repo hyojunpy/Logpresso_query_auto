@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from time import perf_counter
 from uuid import uuid4
 
-from app.api.routes import documents, generate, health
+from app.api.routes import catalog, documents, evaluations, feedback, generate, health
 from app.core.config import settings
 from app.core.logging import configure_request_logging
 
@@ -69,6 +69,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(generate.router, prefix="/api/v1", tags=["query"])
+    app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"])
+    app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["feedback"])
+    app.include_router(evaluations.router, prefix="/api/v1/internal/evaluations", tags=["internal"])
     return app
 
 

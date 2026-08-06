@@ -15,6 +15,8 @@ KNOWN_OPTIONS = {
     "rollup": {"label", "parallel"},
     "stream": {"forward", "window"},
     "sort": {"limit"},
+    "join": {"type"},
+    "streamjoin": {"type", "timeout"},
 }
 ADMIN_COMMANDS = {"system", "admin", "delete", "drop", "truncate"}
 EXCLUSIVE_TIME_OPTION_COMMANDS = {"table", "fulltext"}
@@ -89,6 +91,9 @@ class QueryValidator:
         risk = "high" if requires_admin else ("medium" if any("fulltext" in c for c in commands) else "low")
         if requires_admin:
             warnings.append(ValidationIssue(code="admin_required", message="관리자 권한이 필요할 수 있는 명령어가 포함되었습니다."))
+        for warning in warnings:
+            warning.severity = "warning"
+            warning.source = "documentation"
         return ValidationResult(
             valid=not errors,
             errors=errors,

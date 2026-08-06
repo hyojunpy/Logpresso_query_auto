@@ -12,6 +12,7 @@ class Settings:
     doc_path: Path = docs_dir / "로그프레소 쿼리.docx"
     data_dir: Path = BASE_DIR / "data"
     db_path: Path = data_dir / "app.db"
+    catalog_path: Path = data_dir / "catalog.json"
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -20,6 +21,7 @@ class Settings:
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     ollama_timeout_seconds: float = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
+    enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     cors_allowed_origins: tuple[str, ...] = tuple(
         origin.strip()

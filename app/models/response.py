@@ -9,6 +9,11 @@ class ValidationIssue(BaseModel):
     code: str
     message: str
     evidence: str | None = None
+    severity: Literal["info", "warning", "error"] = "error"
+    affected_table: str | None = None
+    affected_field: str | None = None
+    suggestion: str | None = None
+    source: Literal["syntax", "documentation", "catalog", "policy"] = "syntax"
 
 
 class ValidationResult(BaseModel):
@@ -17,9 +22,38 @@ class ValidationResult(BaseModel):
     warnings: list[ValidationIssue] = []
     commands: list[str] = []
     functions: list[str] = []
-    risk_level: Literal["low", "medium", "high"] = "low"
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     requires_admin: bool = False
     compatibility_notes: list[str] = []
+
+
+class QueryQualityResult(BaseModel):
+    safety_score: int
+    performance_score: int
+    completeness_score: int
+    confidence_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    diagnostics: list[ValidationIssue] = []
+    score_reasons: dict[str, list[str]] = {}
+
+
+class ExecutionPreview(BaseModel):
+    status: Literal["not_requested", "preview_ready", "requires_confirmation", "blocked", "unsupported"]
+    is_read_only: bool | None = None
+    risk_level: Literal["low", "medium", "high", "critical"]
+    recommended_limit: int | None = None
+    recommended_timeout_seconds: int | None = None
+    requires_user_confirmation: bool = False
+    blocked_reasons: list[str] = []
+    confirmation_message: str | None = None
+    checks_before_execution: list[str] = []
+
+
+class QueryAnalysisResponse(BaseModel):
+    validation: ValidationResult
+    schema_validation: ValidationResult
+    quality: QueryQualityResult
+    execution_preview: ExecutionPreview
 
 
 class QueryExplanation(BaseModel):
@@ -42,6 +76,9 @@ class GenerateQueryResponse(BaseModel):
     questions: list[str] = []
     intent: QueryIntent | None = None
     validation: ValidationResult | None = None
+    schema_validation: ValidationResult | None = None
+    quality: QueryQualityResult | None = None
+    execution_preview: ExecutionPreview | None = None
     explanation: list[QueryExplanation] = []
     references: list[QueryReference] = []
     assumptions: list[str] = []

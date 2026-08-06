@@ -96,7 +96,7 @@ def main() -> int:
     if not wait_ports_free(8000, 8501):
         print("ports 8000/8501 are still in use; restart aborted")
         return 1 if stopped else 2
-    start_process("api", ["-m", "uvicorn", "app.api.main:app", "--host", "127.0.0.1", "--port", "8000"], "api.log")
+    start_process("api", ["-m", "uvicorn", "app.api.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"], "api.log")
     start_process(
         "ui",
         [

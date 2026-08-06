@@ -1,12 +1,8 @@
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
-
-
-MAX_NATURAL_LANGUAGE_LENGTH = 4_000
-MAX_QUERY_LENGTH = 20_000
-MAX_KNOWN_TABLES = 200
-MAX_KNOWN_FIELDS = 500
 
 
 class TimeRange(BaseModel):
@@ -45,6 +41,21 @@ class RenameOperation(BaseModel):
     new_name: str
 
 
+class JoinSpec(BaseModel):
+    command: Literal["join", "streamjoin"] = "join"
+    join_type: Literal["inner", "left", "right", "full", "leftonly", "rightonly"] = "inner"
+    left_source_type: Literal["table", "stream", "logger"] = "table"
+    left_table: str
+    right_table: str
+    left_key: str
+    right_key: str
+    left_rename: str | None = None
+    right_rename: str | None = None
+    helper_key: str = "_join_key"
+    left_filters: list[FilterCondition] = []
+    right_filters: list[FilterCondition] = []
+
+
 class QueryIntent(BaseModel):
     objective: str
     query_type: Literal["adhoc", "realtime", "stream", "scheduled", "unknown"] = "unknown"
@@ -52,57 +63,88 @@ class QueryIntent(BaseModel):
     tables: list[str] = []
     loggers: list[str] = []
     streams: list[str] = []
-    stream_window: str | None = None
-    logger_window: str | None = None
-    file_command: str | None = None
-    file_path: str | None = None
-    archive_member: str | None = None
+    forward_streams: list[str] = []
     fulltext_expression: str | None = None
     time_range: TimeRange | None = None
-    source_order: Literal["asc", "desc"] | None = None
     use_parameterized_time_range: bool = False
     filters: list[FilterCondition] = []
     post_filters: list[FilterCondition] = []
     selected_fields: list[str] = []
     computed_fields: list[ComputedField] = []
-    parser_name: str | None = None
-    structured_parser: Literal["parsejson", "parsecsv"] | None = None
-    structured_parser_field: str | None = None
-    parser_flatten: bool = False
-    parser_tab: bool = False
-    explode_fields: list[str] = []
     renames: list[RenameOperation] = []
+    join: JoinSpec | None = None
     group_by: list[str] = []
     aggregations: list[Aggregation] = []
     aggregation_command: Literal["stats", "rollup"] = "stats"
     final_aggregations: list[Aggregation] = []
     sort: list[SortCondition] = []
-    offset: int | None = None
     limit: int | None = None
     output_format: str | None = None
     assumptions: list[str] = []
     missing_information: list[str] = []
 
 
+class CatalogField(BaseModel):
+    field_name: str
+    field_type: str = "unknown"
+    description: str | None = None
+    nullable: bool | None = None
+
+
+class CatalogTable(BaseModel):
+    table_name: str
+    node: str | None = None
+    namespace: str | None = None
+    description: str | None = None
+    fields: list[CatalogField] = []
+
+
+class CatalogFunctionTypeRule(BaseModel):
+    function_name: str
+    argument_index: int = 0
+    allowed_field_types: list[str]
+    description: str | None = None
+
+
+class Catalog(BaseModel):
+    tables: list[CatalogTable] = []
+    catalog_version: str | None = None
+    updated_at: str | None = None
+    source: Literal["manual", "fixture", "external_sync", "unknown"] = "unknown"
+    function_type_rules: list[CatalogFunctionTypeRule] = []
+
+
 class RequestContext(BaseModel):
-    product: str | None = Field(default=None, max_length=32)
-    version: str | None = Field(default=None, max_length=64)
-    known_tables: list[str] = Field(default_factory=list, max_length=MAX_KNOWN_TABLES)
-    known_fields: list[str] = Field(default_factory=list, max_length=MAX_KNOWN_FIELDS)
+    product: str | None = None
+    version: str | None = None
+    known_tables: list[str] = []
+    known_fields: list[str] = []
+    known_loggers: list[str] = []
+    known_streams: list[str] = []
+    catalog: Catalog | None = None
+    request_catalog: Catalog | None = None
 
 
 class GenerateQueryRequest(BaseModel):
-    request: str = Field(
-        min_length=1,
-        max_length=MAX_NATURAL_LANGUAGE_LENGTH,
-        examples=["최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘"],
-    )
-    context: RequestContext = Field(default_factory=RequestContext)
+    request: str = Field(min_length=1)
+    context: RequestContext = RequestContext()
 
 
 class ValidateQueryRequest(BaseModel):
-    query: str = Field(
-        min_length=1,
-        max_length=MAX_QUERY_LENGTH,
-        examples=["table duration=24h firewall_logs\n| stats count by src_ip"],
-    )
+    query: str = Field(min_length=1, examples=["table duration=24h firewall_logs\n| stats count by src_ip"])
+    catalog: Catalog | None = None
+    context: RequestContext = RequestContext()
+
+
+class CatalogUpsertRequest(BaseModel):
+    catalog: Catalog
+
+
+class FeedbackRequest(BaseModel):
+    request_text: str = Field(min_length=1)
+    generated_query: str | None = None
+    result_status: str
+    rating: Literal["positive", "negative", "neutral"]
+    feedback_comment: str | None = None
+    issue_type: Literal["wrong_table", "wrong_field", "wrong_time_range", "invalid_syntax", "unsafe_query", "irrelevant_query", "other"] | None = None
+    store_raw_text: bool = False
