@@ -315,6 +315,37 @@ def render_revalidation_summary(analysis: dict) -> None:
         st.json(analysis)
 
 
+def query_structure_dot(intent: dict) -> str:
+    """Render the parsed plan only; this never executes a query."""
+    tables = intent.get("tables") or []
+    join = intent.get("join") or {}
+    filters = intent.get("filters") or []
+    aggregations = intent.get("aggregations") or []
+    lines = ["digraph query {", "rankdir=LR;", 'node [shape=box, style="rounded,filled", fillcolor="#f5f7fa"];']
+    for table in tables:
+        lines.append(f'"table:{table}" [label="table\\n{table}"];')
+    if join:
+        left = join.get("left_table", "left")
+        right = join.get("right_table", "right")
+        label = f"{join.get('join_type', 'inner')} join\\n{join.get('left_key', '')} = {join.get('right_key', '')}"
+        lines.append(f'"table:{left}" -> "table:{right}" [label="{label}"];')
+    previous = f"table:{tables[0]}" if tables else None
+    for index, item in enumerate(filters):
+        node = f"filter:{index}"
+        lines.append(f'"{node}" [label="filter\\n{item.get("field", "")} {item.get("operator", "")} {item.get("value", "")}", fillcolor="#fff6d9"];')
+        if previous:
+            lines.append(f'"{previous}" -> "{node}";')
+        previous = node
+    for index, item in enumerate(aggregations):
+        node = f"aggregate:{index}"
+        lines.append(f'"{node}" [label="aggregate\\n{item.get("function", "")}({item.get("field") or ""})", fillcolor="#e8f5ef"];')
+        if previous:
+            lines.append(f'"{previous}" -> "{node}";')
+        previous = node
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def clear_clarification_state() -> None:
     st.session_state.pop("clarification_answer", None)
 
@@ -395,7 +426,7 @@ if response:
     if st.session_state.get("editable_query_source") != st.session_state.get("response_fingerprint"):
         st.session_state["editable_query"] = response.get("query") or ""
         st.session_state["editable_query_source"] = st.session_state.get("response_fingerprint")
-    tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조화 요청", "디버그"])
+    tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조", "구조화 요청", "디버그"])
     with tabs[0]:
         if needs_clarification:
             for question in response.get("questions", []):
@@ -466,6 +497,9 @@ if response:
     with tabs[3]:
         st.json(response.get("references", []))
     with tabs[4]:
+        st.graphviz_chart(query_structure_dot(response.get("intent") or {}), use_container_width=True)
+        st.caption("이 화면은 생성 계획을 시각화한 것이며, Logpresso 실행을 수행하지 않습니다.")
+    with tabs[5]:
         debug = response.get("debug", {})
         if response.get("assumptions") or debug.get("llm_intent_fallback"):
             st.subheader("AI 해석 결과")
@@ -474,7 +508,7 @@ if response:
             for assumption in response.get("assumptions", []):
                 st.warning(f"추정: {assumption}")
         st.json(response.get("intent", {}))
-    with tabs[5]:
+    with tabs[6]:
         st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
 
     st.download_button(
