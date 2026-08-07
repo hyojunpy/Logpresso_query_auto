@@ -86,6 +86,7 @@ class IntentParser:
         intent.sort = self._sort(text, intent.aggregations)
         intent.limit = self._limit(text)
         self._apply_business_shortcuts(text, intent)
+        self._apply_free_form_defaults(text, intent)
 
         if "실시간" in text:
             intent.query_type = "realtime"
@@ -541,6 +542,82 @@ class IntentParser:
                 intent.aggregations.append(Aggregation(function="count"))
             if not intent.sort:
                 intent.sort.append(SortCondition(field="count", direction="desc"))
+
+    @staticmethod
+    def _apply_free_form_defaults(text: str, intent: QueryIntent) -> None:
+        """Produce a reviewable draft for common operational requests without forcing a second prompt."""
+        def add_table(name: str) -> None:
+            if name not in intent.tables:
+                intent.tables.append(name)
+
+        def add_filter(field: str, value: str, value_type: str = "string") -> None:
+            if not any(item.field == field for item in intent.filters):
+                intent.filters.append(FilterCondition(field=field, value=value, value_type=value_type))
+
+        def count_by(field: str) -> None:
+            if not intent.group_by:
+                intent.group_by.append(field)
+            if not intent.aggregations:
+                intent.aggregations.append(Aggregation(function="count"))
+            if not intent.sort:
+                intent.sort.append(SortCondition(field="count", direction="desc"))
+
+        inferred: list[str] = []
+        if "\uB85C\uADF8\uC778 \uC2E4\uD328" in text:
+            add_table("auth_logs")
+            add_filter("status", "failure")
+            count_by("account_id" if "\uACC4\uC815" in text else "host")
+            inferred.extend(["auth_logs", "status=failure"])
+        if "\uC6F9 \uC11C\uBC84 \uC624\uB958" in text or "\uC6F9\uC11C\uBC84 \uC624\uB958" in text:
+            add_table("web_logs")
+            add_filter("severity", "error")
+            count_by("_time")
+            inferred.extend(["web_logs", "severity=error"])
+        if "\uCC28\uB2E8 \uD69F\uC218" in text or "\uCD9C\uBC1C\uC9C0 \uC8FC\uC18C\uBCC4" in text:
+            add_table("firewall_logs")
+            add_filter("action", "deny")
+            count_by("src_ip")
+            inferred.extend(["firewall_logs", "action=deny", "src_ip"])
+        if "\uCC28\uB2E8 \uB85C\uADF8" in text:
+            add_table("firewall_logs")
+            add_filter("action", "deny")
+            if not intent.group_by and ("\uB9CE\uC740 \uC21C" in text or "\uC0C1\uC704" in text):
+                count_by("src_ip")
+            inferred.extend(["firewall_logs", "action=deny"])
+        if "\uD3EC\uD2B8" in text and ("\uB9C9\uD78C" in text or "\uCC28\uB2E8" in text):
+            port = re.search(r"\b(\d{1,5})\b", text)
+            add_table("firewall_logs")
+            add_filter("action", "deny")
+            if port:
+                add_filter("dst_port", port.group(1), "number")
+            inferred.extend(["firewall_logs", "action=deny", "dst_port"])
+        if "\uC9C1\uC6D0 IP" in text and "\uBC29\uD654\uBCBD \uB85C\uADF8" in text:
+            intent.tables = ["firewall_logs", "insa"]
+            intent.join = JoinSpec(
+                join_type="left", left_table="firewall_logs", right_table="insa",
+                left_key="src_ip", right_key="ip",
+            )
+            inferred.extend(["firewall_logs", "insa", "src_ip=ip"])
+        if "\uB370\uC774\uD130 \uC804\uC1A1\uB7C9" in text and "\uD638\uC2A4\uD2B8" in text:
+            add_table("metrics_logs")
+            if not intent.group_by:
+                intent.group_by.append("host")
+            if not intent.aggregations:
+                intent.aggregations.append(Aggregation(function="sum", field="bytes", alias="sum_bytes"))
+            if not intent.sort:
+                intent.sort.append(SortCondition(field="sum_bytes", direction="desc"))
+            inferred.extend(["metrics_logs", "sum(bytes)", "host"])
+        if "timeout" in text and any(token in text for token in ("\uC5D0\uB7EC \uB85C\uADF8", "\uC624\uB958 \uB85C\uADF8")):
+            add_table("app_logs")
+            add_filter("message", "*timeout*")
+            inferred.extend(["app_logs", "message contains timeout"])
+        if "\uC11C\uBC84\uBCC4 \uB85C\uADF8\uC778 \uC2E4\uD328" in text:
+            add_table("auth_logs")
+            add_filter("status", "failure")
+            count_by("host")
+            inferred.extend(["auth_logs", "status=failure", "host"])
+        if inferred:
+            intent.assumptions.append("Free-form defaults inferred: " + ", ".join(dict.fromkeys(inferred)) + ". Confirm against the catalog.")
         if "계정별" in text and not intent.group_by:
             intent.group_by.append("account_id")
         if "시간대별" in text and not intent.group_by:
@@ -1077,6 +1154,7 @@ class IntentParser:
             intent.source_type != "fulltext"
             and self._looks_like_string_filter(text)
             and not all_filters
+            and not intent.join
             and not any("Experimental eval expression" in assumption for assumption in intent.assumptions)
         ):
             intent.missing_information.append("필터에 사용할 필드명과 값")
