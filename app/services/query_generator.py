@@ -17,6 +17,7 @@ from app.services.retriever import Retriever
 from app.services.catalog_service import CatalogService
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
+from app.services.alias_store import AliasStore
 
 
 class QueryGenerator:
@@ -30,6 +31,7 @@ class QueryGenerator:
         self.llm = llm or self._provider()
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
+        payload = self._with_business_aliases(payload)
         intent = self.intent_parser.parse(payload)
         search_text = f"{payload.request} table logger stream fulltext search stats rollup timechart eval fields rename join first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
@@ -118,6 +120,26 @@ class QueryGenerator:
                 "repair_attempts": repair_attempts,
             },
         )
+
+    @staticmethod
+    def _with_business_aliases(payload: GenerateQueryRequest) -> GenerateQueryRequest:
+        context = payload.context.model_copy(deep=True)
+        additions: list[str] = []
+        try:
+            aliases = AliasStore(settings.db_path).list()
+        except Exception:
+            return payload
+        for alias in aliases:
+            if alias["phrase"].lower() not in payload.request.lower():
+                continue
+            if alias["kind"] == "table" and alias["target"] not in context.known_tables:
+                context.known_tables.append(alias["target"])
+                additions.append(f"{alias['target']} 테이블")
+            elif alias["kind"] == "field" and alias["target"] not in context.known_fields:
+                context.known_fields.append(alias["target"])
+        if not additions:
+            return payload.model_copy(update={"context": context})
+        return payload.model_copy(update={"request": payload.request + "\n" + " ".join(additions), "context": context})
 
     def _validate(self, query: str, payload: GenerateQueryRequest):
         syntax = self.validator.validate(query)

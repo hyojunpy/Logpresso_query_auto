@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
 from app.services.catalog_service import CatalogService
 from app.services.feedback_store import FeedbackStore
+from app.services.alias_store import AliasStore
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.indexer import DocumentIndex
 from app.services.quality_analyzer import QueryQualityAnalyzer
@@ -120,6 +121,22 @@ with st.sidebar:
     known_fields = st.text_area("필드 힌트 (선택)", placeholder="예: src_ip\naction\n_time")
     known_loggers = st.text_area("logger 힌트 (선택)", placeholder="예: local\\firewall_logger")
     known_streams = st.text_area("stream 힌트 (선택)", placeholder="예: firewall_stream")
+    with st.expander("업무 별칭 관리"):
+        alias_store = AliasStore(settings.db_path)
+        alias_phrase = st.text_input("업무 표현", key="alias_phrase", placeholder="예: 내부 방화벽")
+        alias_target = st.text_input("테이블 또는 필드", key="alias_target", placeholder="예: corp_firewall_logs")
+        alias_kind = st.selectbox("별칭 종류", ["table", "field"], key="alias_kind")
+        if st.button("별칭 저장"):
+            try:
+                alias_store.save(alias_phrase, alias_target, alias_kind)
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success("별칭을 저장했습니다.")
+                st.rerun()
+        aliases = alias_store.list()
+        if aliases:
+            st.dataframe(aliases, use_container_width=True, hide_index=True)
     st.caption("비워 두어도 요청에 명시한 테이블과 필드를 생성에 사용합니다. 실제 존재 여부는 카탈로그가 있을 때 검증합니다.")
     request_schema = st.text_area("이번 요청 스키마 (선택)", placeholder="firewall_logs: src_ip, action, _time\napp_logs: message, host")
     try:
@@ -179,7 +196,13 @@ examples = [
     "에러 로그 보여줘",
 ]
 selected = st.selectbox("예제 요청", [""] + examples)
-default_request = selected or st.session_state.get("request_text", "")
+quick_requests = [
+    "방화벽에서 외부로 나간 통신 중 많은 IP부터 보고 싶어",
+    "어제 로그인 실패한 사용자들을 계정별로 정리해줘",
+    "인사 정보랑 방화벽 로그를 IP 기준으로 합쳐서 누가 차단됐는지 보고 싶어",
+]
+quick_choice = st.selectbox("빠른 테스트", [""] + quick_requests)
+default_request = quick_choice or selected or st.session_state.get("request_text", "")
 request_text = st.text_area("사용자 요청", value=default_request, height=130)
 
 
