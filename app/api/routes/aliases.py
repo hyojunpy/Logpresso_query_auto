@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -22,3 +22,10 @@ def list_aliases():
 @router.post("")
 def save_alias(payload: AliasUpsert = Body(...)):
     return AliasStore(settings.db_path).save(payload.phrase, payload.target, payload.kind)
+
+
+@router.delete("/{kind}/{phrase}")
+def delete_alias(kind: str, phrase: str):
+    if not AliasStore(settings.db_path).delete(phrase, kind):
+        raise HTTPException(status_code=404, detail="alias not found")
+    return {"deleted": True}

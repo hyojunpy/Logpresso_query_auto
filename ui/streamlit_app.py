@@ -142,6 +142,11 @@ with st.sidebar:
         aliases = alias_store.list()
         if aliases:
             st.dataframe(aliases, use_container_width=True, hide_index=True)
+            alias_to_delete = st.selectbox("삭제할 별칭", [""] + [f"{item['kind']}: {item['phrase']}" for item in aliases])
+            if st.button("선택 별칭 삭제") and alias_to_delete:
+                kind, phrase = alias_to_delete.split(": ", 1)
+                alias_store.delete(phrase, kind)
+                st.rerun()
     st.caption("비워 두어도 요청에 명시한 테이블과 필드를 생성에 사용합니다. 실제 존재 여부는 카탈로그가 있을 때 검증합니다.")
     request_schema = st.text_area("이번 요청 스키마 (선택)", placeholder="firewall_logs: src_ip, action, _time\napp_logs: message, host")
     try:
@@ -214,6 +219,11 @@ quick_requests = [
 quick_choice = st.selectbox("빠른 테스트", [""] + quick_requests)
 default_request = quick_choice or selected or st.session_state.get("request_text", "")
 request_text = st.text_area("사용자 요청", value=default_request, height=130)
+with st.expander("생성 전 해석 편집", expanded=False):
+    st.caption("자연어 해석이 다를 때 이 값만 보완해 다시 생성할 수 있습니다.")
+    interpretation_tables = st.text_input("테이블", placeholder="예: firewall_logs, insa")
+    interpretation_fields = st.text_input("필드", placeholder="예: src_ip, dst_ip, action")
+    interpretation_join_keys = st.text_input("조인 키", placeholder="예: firewall_logs.src_ip, insa.ip")
 
 
 def request_fingerprint(text: str, context: RequestContext) -> str:
@@ -233,10 +243,12 @@ def current_context() -> RequestContext:
         version=version or None,
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
+            + [value.strip() for value in interpretation_tables.split(",") if value.strip()]
             + [table.table_name for table in catalog_tables + request_tables]
         )),
         known_fields=list(dict.fromkeys(
             [line.strip() for line in known_fields.splitlines() if line.strip()]
+            + [value.strip() for value in interpretation_fields.split(",") if value.strip()]
             + [field.field_name for table in catalog_tables + request_tables for field in table.fields]
         )),
         known_loggers=[line.strip() for line in known_loggers.splitlines() if line.strip()],
@@ -321,7 +333,15 @@ def generate(text: str, *, clear_answer: bool = True) -> None:
     if clear_answer:
         clear_clarification_state()
     context = current_context()
-    payload = GenerateQueryRequest(request=text, context=context)
+    additions = []
+    if interpretation_tables:
+        additions.append("테이블은 " + interpretation_tables)
+    if interpretation_fields:
+        additions.append("필드는 " + interpretation_fields)
+    if interpretation_join_keys:
+        additions.append("조인 키는 " + interpretation_join_keys)
+    enriched_text = text + ("\n추가 조건: " + " / ".join(additions) if additions else "")
+    payload = GenerateQueryRequest(request=enriched_text, context=context)
     generator = QueryGenerator(Retriever(index))
     response = generator.generate(payload)
     st.session_state["request_text"] = text

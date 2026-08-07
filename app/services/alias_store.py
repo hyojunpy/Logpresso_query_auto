@@ -30,6 +30,12 @@ class AliasStore:
             )
         return {"phrase": phrase.strip(), "target": target.strip(), "kind": kind}
 
+    def delete(self, phrase: str, kind: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure(conn)
+            deleted = conn.execute("delete from query_alias where phrase=? and kind=?", (phrase, kind)).rowcount
+        return bool(deleted)
+
     @staticmethod
     def _ensure(conn: sqlite3.Connection) -> None:
         conn.execute("create table if not exists query_alias (phrase text not null, target text not null, kind text not null, unique(phrase, kind))")
