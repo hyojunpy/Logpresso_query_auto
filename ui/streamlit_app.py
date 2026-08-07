@@ -112,6 +112,11 @@ def catalog_from_rows(rows, previous: Catalog | None) -> Catalog:
 with st.sidebar:
     st.subheader("상태")
     st.write(f"LLM provider: `{settings.llm_provider}`")
+    st.write(f"LLM model: `{settings.ollama_model if settings.llm_provider == 'ollama' else settings.openai_model}`")
+    st.caption("모델 변경은 `.env`의 `OLLAMA_MODEL` 또는 `OPENAI_MODEL`을 바꾼 뒤 서버를 재시작하면 적용됩니다.")
+    feedback_summary = FeedbackStore(settings.db_path).summary()
+    if feedback_summary["total"]:
+        st.caption(f"저장된 피드백: {feedback_summary['total']}건 | 문제 유형: {feedback_summary['issue_types']}")
     st.write(f"문서 인덱스: {'완료' if status['indexed'] else '미생성'}")
     st.write(f"문서 변경됨: {'예' if status['stale'] else '아니오'}")
     st.write(f"청크 수: {status['chunk_count']}")
@@ -184,6 +189,11 @@ with st.sidebar:
     if st.button("문서 다시 인덱싱"):
         result = index.rebuild(settings.doc_path)
         st.success(f"{result['chunk_count']}개 청크를 인덱싱했습니다.")
+
+    with st.expander("실행 연동 준비"):
+        st.success("DRY RUN 준비 완료")
+        st.write("실제 Logpresso 실행은 비활성화되어 있습니다.")
+        st.caption("생성 쿼리는 검증 후 복사해서 Logpresso에서 수동 실행합니다.")
 
 st.title("로그프레소 자연어 쿼리 생성기")
 
