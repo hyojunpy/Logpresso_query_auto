@@ -119,6 +119,26 @@ class QueryGeneratorTest(unittest.TestCase):
             "]",
         )
 
+    def test_generates_join_from_table_and_db_wording_with_shared_rename(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall 테이블의 src_ip와 insa db의 ip를 할당 ip로 바꾸고 left join 할거야",
+                context=RequestContext(),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertEqual(
+            response.query,
+            "table firewall\n"
+            "| rename src_ip as 할당_ip\n"
+            "| eval _join_key = 할당_ip\n"
+            "| join type=left _join_key [\n"
+            "    table insa\n"
+            "    | rename ip as 할당_ip\n"
+            "    | eval _join_key = 할당_ip\n"
+            "]",
+        )
+
     def test_generates_full_join_when_requested(self):
         response = generator().generate(
             GenerateQueryRequest(

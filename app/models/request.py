@@ -61,6 +61,7 @@ class QueryIntent(BaseModel):
     query_type: Literal["adhoc", "realtime", "stream", "scheduled", "unknown"] = "unknown"
     source_type: Literal["table", "logger", "stream", "fulltext", "file", "unknown"] = "unknown"
     tables: list[str] = []
+    table_candidates: list[str] = []
     loggers: list[str] = []
     streams: list[str] = []
     forward_streams: list[str] = []

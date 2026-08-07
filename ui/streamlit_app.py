@@ -13,6 +13,7 @@ from app.services.execution_preview import ExecutionPreviewService
 from app.services.indexer import DocumentIndex
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.query_generator import QueryGenerator
+from app.services.intent_parser import IntentParser
 from app.services.query_validator import QueryValidator
 from app.services.retriever import Retriever
 
@@ -229,6 +230,46 @@ def analyze_query_data(query: str, context: RequestContext) -> dict:
     }
 
 
+def render_revalidation_summary(analysis: dict) -> None:
+    validation = analysis.get("validation", {})
+    quality = analysis.get("quality", {})
+    preview = analysis.get("execution_preview", {})
+    errors = validation.get("errors", [])
+    warnings = validation.get("warnings", [])
+    risk_level = quality.get("risk_level", "unknown")
+
+    if validation.get("valid"):
+        st.success("수정 쿼리는 현재 검증 규칙을 통과했습니다.")
+    else:
+        st.error(f"수정 쿼리에서 {len(errors)}개의 오류를 찾았습니다.")
+
+    status_column, risk_column, preview_column = st.columns(3)
+    status_column.metric("문법/스키마", "통과" if validation.get("valid") else "오류")
+    risk_column.metric("위험도", risk_level.upper())
+    preview_column.metric("실행 준비", preview.get("status", "not_requested"))
+
+    if errors:
+        st.caption("수정이 필요한 항목")
+        for issue in errors:
+            st.error(issue.get("message", "검증 오류") + (f" 제안: {issue['suggestion']}" if issue.get("suggestion") else ""))
+    if warnings:
+        st.caption("확인 권장 항목")
+        for issue in warnings:
+            st.warning(issue.get("message", "검증 경고") + (f" 제안: {issue['suggestion']}" if issue.get("suggestion") else ""))
+
+    diagnostics = quality.get("diagnostics", [])
+    if diagnostics:
+        with st.expander(f"품질 진단 {len(diagnostics)}건"):
+            for issue in diagnostics:
+                st.write(f"- {issue.get('message', '')}")
+                if issue.get("suggestion"):
+                    st.caption(f"제안: {issue['suggestion']}")
+    if preview.get("confirmation_message"):
+        st.info(preview["confirmation_message"])
+    with st.expander("상세 JSON"):
+        st.json(analysis)
+
+
 def clear_clarification_state() -> None:
     st.session_state.pop("clarification_answer", None)
 
@@ -262,6 +303,10 @@ def generate(text: str, *, clear_answer: bool = True) -> None:
 
 
 current_fingerprint = request_fingerprint(request_text, current_context())
+if request_text.strip():
+    preview_intent = IntentParser().parse(GenerateQueryRequest(request=request_text, context=current_context()))
+    if preview_intent.table_candidates:
+        st.caption("AI 해석 후보 테이블: " + ", ".join(preview_intent.table_candidates) + " (카탈로그로 확인 권장)")
 if (
     "response_fingerprint" in st.session_state
     and st.session_state["response_fingerprint"] != current_fingerprint
@@ -269,8 +314,13 @@ if (
     clear_result_state()
 
 
-if st.button("쿼리 생성", type="primary"):
-    generate(request_text)
+generate_button, generate_progress = st.columns([1, 4], vertical_alignment="center")
+with generate_button:
+    requested_generation = st.button("쿼리 생성", type="primary")
+if requested_generation:
+    with generate_progress:
+        with st.spinner("쿼리 생성 중...", show_time=True):
+            generate(request_text)
     st.rerun()
 
 response = st.session_state.get("response")
@@ -310,6 +360,8 @@ if response:
             if st.button("수정 쿼리 재검증"):
                 st.session_state["edited_query_analysis"] = analyze_query_data(edited_query, current_context())
                 st.session_state["edited_query_analysis_fingerprint"] = edited_fingerprint
+            if edited_analysis := st.session_state.get("edited_query_analysis"):
+                render_revalidation_summary(edited_analysis)
         else:
             st.error("쿼리를 생성하지 못했습니다.")
     with tabs[1]:
@@ -357,7 +409,7 @@ if response:
             st.caption("이 도구는 쿼리를 자동 실행하지 않습니다. 복사한 쿼리를 Logpresso에서 직접 검토 후 수동 실행하세요.")
         if edited_analysis := st.session_state.get("edited_query_analysis"):
             st.subheader("수정 쿼리 재검증")
-            st.json(edited_analysis)
+            render_revalidation_summary(edited_analysis)
     with tabs[3]:
         st.json(response.get("references", []))
     with tabs[4]:

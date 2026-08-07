@@ -134,7 +134,7 @@ class QueryGenerator:
             return None
 
         data = self.llm.generate_json(self._intent_resolution_prompt(payload, intent, results), results)
-        query = self._query_from_llm_intent(data, intent)
+        query = self._query_from_llm_intent(data, intent, payload)
         if not query:
             return None
 
@@ -176,11 +176,15 @@ class QueryGenerator:
         )
 
     @staticmethod
-    def _query_from_llm_intent(data: dict, intent: QueryIntent) -> str | None:
+    def _query_from_llm_intent(data: dict, intent: QueryIntent, payload: GenerateQueryRequest) -> str | None:
         if data.get("status") != "generated":
             return None
         table = data.get("table")
-        if not isinstance(table, str) or table not in intent.tables:
+        allowed_tables = set(intent.tables)
+        catalog = payload.context.catalog or payload.context.request_catalog
+        if catalog:
+            allowed_tables.update(item.table_name for item in catalog.tables)
+        if not isinstance(table, str) or table not in allowed_tables:
             return None
 
         duration = data.get("duration")
@@ -531,6 +535,7 @@ class QueryGenerator:
             ),
             "request": payload.request,
             "allowed_tables": intent.tables,
+            "table_candidates": intent.table_candidates,
             "detected_duration": intent.time_range.duration if intent.time_range else None,
             "detected_limit": intent.limit,
             "required_semantics": {

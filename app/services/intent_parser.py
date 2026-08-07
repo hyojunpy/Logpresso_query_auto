@@ -47,6 +47,18 @@ class IntentParser:
         intent.query_type = "adhoc"
         intent.source_type = self._source_type(text, context.known_streams)
         intent.tables = self._tables(text, context.known_tables, allow_single_default=intent.source_type != "fulltext")
+        if not intent.tables and re.search(r"\b\d{1,5}\s*(?:\uD3EC\uD2B8|port)\b", text, flags=re.IGNORECASE) and (any(word in text for word in DENY_WORDS) or "\uB9C9\uD78C" in text):
+            intent.tables.append("firewall")
+            intent.assumptions.append("Blocked-port shorthand inferred as firewall. Confirm the table against the catalog.")
+        if not intent.tables and re.search(r"\b\d{1,5}\s*(?:포트|port)\b", text, flags=re.IGNORECASE) and (any(word in text for word in DENY_WORDS) or "막힌" in text):
+            intent.tables.append("firewall")
+            intent.assumptions.append("Blocked-port shorthand inferred as firewall. Confirm the table against the catalog.")
+        intent.table_candidates = self._table_candidates(text, context.known_tables)
+        inferred_tables = [table for table in intent.tables if table in intent.table_candidates]
+        if inferred_tables:
+            intent.assumptions.append(
+                f"Natural-language table aliases inferred: {', '.join(inferred_tables)}. Confirm them against the catalog."
+            )
         semantic_hints = self._semantic_field_hints(text, intent.tables)
         known_fields = list(dict.fromkeys([*known_fields, *semantic_hints]))
         if semantic_hints:
@@ -73,6 +85,7 @@ class IntentParser:
             intent.filters = self._partition_join_filters(text, intent.join, intent.filters)
         intent.sort = self._sort(text, intent.aggregations)
         intent.limit = self._limit(text)
+        self._apply_business_shortcuts(text, intent)
 
         if "실시간" in text:
             intent.query_type = "realtime"
@@ -133,10 +146,15 @@ class IntentParser:
             hints.append("account_id")
         if "호스트" in text or "host" in lowered:
             hints.append("host")
-        if is_firewall_request and any(word in lowered for word in DENY_WORDS):
+        explicit_deny_field = re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*(?:가|이|은|는)\s*deny\b", text)
+        if is_firewall_request and any(word in lowered for word in DENY_WORDS) and not explicit_deny_field:
             hints.append("action")
         if any(word.lower() in lowered for word in ERROR_WORDS) and any("app" in table.lower() for table in tables):
             hints.append("severity")
+        if any(phrase in text for phrase in ("외부로 나간", "나간 통신", "출발지 주소", "출발지 IP")):
+            hints.append("src_ip")
+        if any(phrase in text for phrase in ("직원 IP", "인사 IP")):
+            hints.append("ip")
         return hints
 
     @staticmethod
@@ -160,7 +178,7 @@ class IntentParser:
         return fields
 
     def _join(self, text: str, tables: list[str], known_fields: list[str], source_type: str, streams: list[str], loggers: list[str]) -> JoinSpec | None:
-        if not any(word in text.lower() for word in ("join", "조인")):
+        if not any(word in text.lower() for word in ("join", "조인", "합쳐", "연결")):
             return None
         realtime_source = streams[0] if source_type == "stream" and streams else (loggers[0] if source_type == "logger" and loggers else None)
         if len(tables) < 2 and not (realtime_source and tables):
@@ -168,7 +186,7 @@ class IntentParser:
         mentioned_fields = [field for field in known_fields if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", text)]
         # Supports fully specified join mappings even when no sidebar schema is supplied.
         explicit_pairs = re.findall(
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:의|\.)\s*([A-Za-z_][A-Za-z0-9_]*)",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:테이블|db)?\s*(?:의|\.)\s*([A-Za-z_][A-Za-z0-9_]*)",
             text,
         )
         for _, field in explicit_pairs:
@@ -188,6 +206,11 @@ class IntentParser:
         else:
             left_key = key_match.group(1) if key_match else (mentioned_fields[0] if mentioned_fields else "")
             right_key = next((field for field in mentioned_fields if field != left_key), "")
+        if not left_key or not right_key:
+            if len(tables) >= 2 and re.search(r"\bip\s*(?:기준|로)", text, flags=re.IGNORECASE):
+                left_key = right_key = "ip"
+            else:
+                return None
         if not left_key or not right_key:
             return None
         lowered = text.lower()
@@ -212,6 +235,9 @@ class IntentParser:
             if firewall_table:
                 left_table = firewall_table
                 right_table = next(table for table in tables if table != firewall_table)
+        shared_rename = self._shared_join_rename_target(text, left_key, right_key)
+        if not shared_rename and left_key == right_key:
+            shared_rename = self._common_key_rename_target(text, left_key)
         return JoinSpec(
             command=command,
             join_type=join_type,
@@ -220,9 +246,29 @@ class IntentParser:
             right_table=right_table,
             left_key=left_key,
             right_key=right_key,
-            left_rename=self._rename_target(text, left_key),
-            right_rename=self._rename_target(text, right_key),
+            left_rename=shared_rename or self._rename_target(text, left_key),
+            right_rename=shared_rename or self._rename_target(text, right_key),
         )
+
+    @staticmethod
+    def _shared_join_rename_target(text: str, left_key: str, right_key: str) -> str | None:
+        match = re.search(
+            rf"{re.escape(left_key)}.*?{re.escape(right_key)}\s*(?:를|을)?\s*([가-힣A-Za-z_][가-힣A-Za-z_ ]*?)\s*(?:으로|로)\s*(?:바꾸|변경|rename)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        return re.sub(r"\s+", "_", match.group(1).strip())
+
+    @staticmethod
+    def _common_key_rename_target(text: str, key: str) -> str | None:
+        match = re.search(
+            rf"\b{re.escape(key)}\s*(?:컬럼|필드)?\s*(?:이름을)?\s*([가-힣A-Za-z_][가-힣A-Za-z_ ]*?)\s*(?:으로|로)\s*(?:바꾸|변경|rename)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(r"\s+", "_", match.group(1).strip()) if match else None
 
     @staticmethod
     def _rename_target(text: str, field: str) -> str | None:
@@ -393,7 +439,7 @@ class IntentParser:
     def _tables(self, text: str, known_tables: list[str], allow_single_default: bool = True) -> list[str]:
         tables = [table for table in known_tables if table in text]
         explicit_pair_tables = re.findall(
-            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:의|\.)\s*[A-Za-z_][A-Za-z0-9_]*",
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:테이블|db)?\s*(?:의|\.)\s*[A-Za-z_][A-Za-z0-9_]*",
             text,
         )
         for table in explicit_pair_tables:
@@ -419,7 +465,86 @@ class IntentParser:
                     tables.append(table)
         if allow_single_default and not tables and len(known_tables) == 1:
             tables.append(known_tables[0])
+        for candidate in self._table_candidates(text, known_tables):
+            if candidate not in tables:
+                tables.append(candidate)
         return tables
+
+    @staticmethod
+    def _table_candidates(text: str, known_tables: list[str]) -> list[str]:
+        """Resolve common business terms, preferring a configured catalog name."""
+        lowered = text.lower()
+        safe_groups: list[tuple[str, ...]] = []
+        if "\uBC29\uD654\uBCBD \uB85C\uADF8" in text:
+            safe_groups.append(("firewall_logs", "firewall"))
+        elif "\uBC29\uD654\uBCBD" in text or "firewall" in lowered:
+            safe_groups.append(("firewall", "firewall_logs"))
+        if "\uC778\uC0AC" in text or "insa" in lowered:
+            safe_groups.append(("insa", "hr", "employees"))
+        if any(token in text for token in ("\uB85C\uADF8\uC778", "\uC778\uC99D")) or any(token in lowered for token in ("login", "auth")):
+            safe_groups.append(("auth_logs", "login_logs", "authentication_logs"))
+        if any(token in text for token in ("\uC6F9 \uC11C\uBC84", "\uC6F9\uC11C\uBC84")) or "web server" in lowered:
+            safe_groups.append(("web_logs", "access_logs"))
+        if safe_groups:
+            return list(dict.fromkeys(
+                next((table for table in known_tables if table.lower() in defaults), defaults[0])
+                for defaults in safe_groups
+            ))
+        candidates: list[str] = []
+        groups = []
+        if any(phrase in lowered for phrase in ("방화벽 로그", "firewall logs")):
+            groups.append(("firewall_logs", "firewall"))
+        elif any(phrase in lowered for phrase in ("방화벽", "firewall")):
+            groups.append(("firewall", "firewall_logs"))
+        if any(phrase in lowered for phrase in ("인사", "insa", "hr db", "hr database")):
+            groups.append(("insa", "hr", "employees"))
+        if any(phrase in lowered for phrase in ("로그인", "인증", "login", "auth")):
+            groups.append(("auth_logs", "login_logs", "authentication_logs"))
+        if any(phrase in lowered for phrase in ("웹 서버", "웹서버", "web server", "web logs")):
+            groups.append(("web_logs", "access_logs"))
+        for defaults in groups:
+            configured = next((table for table in known_tables if table.lower() in defaults), None)
+            candidate = configured or defaults[0]
+            if candidate not in candidates:
+                candidates.append(candidate)
+        return candidates
+
+    @staticmethod
+    def _apply_business_shortcuts(text: str, intent: QueryIntent) -> None:
+        """Turn clear operational shorthand into an explicit, reviewable intent."""
+        lowered = text.lower()
+        is_firewall = any("firewall" in table.lower() for table in intent.tables)
+        if is_firewall and ("\uCC28\uB2E8" in text or "\uB9C9\uD78C" in text) and not any(item.field == "action" for item in intent.filters):
+            intent.filters.append(FilterCondition(field="action", value="deny"))
+        safe_port_match = re.search(r"\b(\d{1,5})\s*(?:\uD3EC\uD2B8|port)\b", text, flags=re.IGNORECASE)
+        if is_firewall and safe_port_match and not any(item.field in {"dst_port", "port"} for item in intent.filters):
+            intent.filters.append(FilterCondition(field="dst_port", value=safe_port_match.group(1), value_type="number"))
+            intent.assumptions.append("Port shorthand inferred as dst_port. Confirm the field against the catalog.")
+        if is_firewall and any(phrase in text for phrase in ("\uB9CE\uC740 IP", "\uCD9C\uBC1C\uC9C0 \uC8FC\uC18C\uBCC4", "\uCD9C\uBC1C\uC9C0 IP\uBCC4", "\uC0C1\uC704")):
+            if not intent.group_by:
+                intent.group_by.append("src_ip")
+            if not intent.aggregations:
+                intent.aggregations.append(Aggregation(function="count"))
+            if not intent.sort:
+                intent.sort.append(SortCondition(field="count", direction="desc"))
+        if is_firewall and any(word in text for word in DENY_WORDS) and not any(item.field == "action" for item in intent.filters):
+            intent.filters.append(FilterCondition(field="action", value="deny"))
+        port_match = re.search(r"\b(\d{1,5})\s*(?:포트|port)\b", text, flags=re.IGNORECASE)
+        if is_firewall and port_match and not any(item.field in {"dst_port", "port"} for item in intent.filters):
+            intent.filters.append(FilterCondition(field="dst_port", value=port_match.group(1), value_type="number"))
+            intent.assumptions.append("Port shorthand inferred as dst_port. Confirm the field against the catalog.")
+        wants_ranked_ips = any(phrase in text for phrase in ("많은 IP", "출발지 주소별", "출발지 IP별", "상위"))
+        if is_firewall and wants_ranked_ips:
+            if not intent.group_by:
+                intent.group_by.append("src_ip")
+            if not intent.aggregations:
+                intent.aggregations.append(Aggregation(function="count"))
+            if not intent.sort:
+                intent.sort.append(SortCondition(field="count", direction="desc"))
+        if "계정별" in text and not intent.group_by:
+            intent.group_by.append("account_id")
+        if "시간대별" in text and not intent.group_by:
+            intent.group_by.append("_time")
 
     def _fulltext_expression(self, text: str) -> str | None:
         boolean_match = re.search(
@@ -928,6 +1053,11 @@ class IntentParser:
     def _collect_missing_information(self, intent: QueryIntent, text: str, known_fields: list[str]) -> None:
         join_filters = (intent.join.left_filters + intent.join.right_filters) if intent.join else []
         all_filters = intent.filters + intent.post_filters + join_filters
+        explicit_deny_field = re.search(r"(result)\D+deny\b", text, flags=re.IGNORECASE)
+        if explicit_deny_field and explicit_deny_field.group(1) not in known_fields:
+            intent.missing_information.append("필터에 사용할 필드명과 값")
+        if "result" in text.lower() and "result" not in known_fields:
+            intent.missing_information.append("필터에 사용할 필드명과 값")
         if intent.source_type == "table" and not intent.tables:
             intent.missing_information.append("조회할 로그프레소 테이블 이름")
         if intent.source_type == "stream" and not intent.streams:
