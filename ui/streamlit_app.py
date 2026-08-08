@@ -10,7 +10,7 @@ from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequ
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.feedback_store import FeedbackStore
-from app.services.alias_store import AliasStore
+from app.services.alias_store import AliasImportError, AliasStore
 from app.services.generation_comparison import append_comparison_history, comparison_history_rows, compare_generation_results
 from app.services.session_hints import merge_hints, remove_hint
 from app.services.execution_preview import ExecutionPreviewService
@@ -160,6 +160,16 @@ with st.sidebar:
     known_streams = st.text_area("stream 힌트 (선택)", placeholder="예: firewall_stream")
     with st.expander("업무 별칭 관리"):
         alias_store = AliasStore(settings.db_path)
+        alias_file = st.file_uploader("별칭 CSV 가져오기", type=["csv"], key="alias_csv_import")
+        st.caption("CSV 열: phrase,target,kind,scope (kind와 scope는 선택)")
+        if alias_file is not None and st.button("별칭 CSV 저장"):
+            try:
+                count = alias_store.import_csv_bytes(alias_file.getvalue())
+            except AliasImportError as error:
+                st.error(f"별칭 CSV 오류: {error}")
+            else:
+                st.success(f"{count}개 별칭을 저장했습니다.")
+                st.rerun()
         alias_phrase = st.text_input("업무 표현", key="alias_phrase", placeholder="예: 내부 방화벽")
         alias_target = st.text_input("테이블 또는 필드", key="alias_target", placeholder="예: corp_firewall_logs")
         alias_kind = st.selectbox("별칭 종류", ["table", "field"], key="alias_kind")

@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.services.alias_store import AliasStore
+from app.services.alias_store import AliasImportError, AliasStore
 from app.services.audit_store import AuditStore
 from app.core.management_access import audit_actor, require_management_access
 
@@ -34,6 +34,16 @@ def export_aliases(scope: str = Query(default="")):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="logpresso-aliases.csv"'},
     )
+
+
+@router.post("/import/csv", dependencies=[Depends(require_management_access)])
+def import_aliases(request: Request, content: str = Body(..., media_type="text/csv")):
+    try:
+        count = AliasStore(settings.db_path).import_csv_bytes(content.encode("utf-8"))
+    except AliasImportError as error:
+        raise HTTPException(status_code=422, detail={"code": "invalid_alias_csv", "message": str(error)}) from error
+    AuditStore(settings.db_path).record("alias.import_csv", "aliases", actor=audit_actor(request), metadata={"count": count})
+    return {"imported": count}
 
 
 @router.post("", dependencies=[Depends(require_management_access)])

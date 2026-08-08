@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from time import sleep
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -28,8 +29,11 @@ class CatalogService:
     def save(self, catalog: Catalog) -> Catalog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
-            backup = self.backup_dir / f"catalog-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
             self.backup_dir.mkdir(parents=True, exist_ok=True)
+            backup = self.backup_dir / f"catalog-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
+            while backup.exists():
+                sleep(0.001)
+                backup = self.backup_dir / f"catalog-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
             backup.write_text(self.path.read_text(encoding="utf-8"), encoding="utf-8")
         self.path.write_text(catalog.model_dump_json(indent=2), encoding="utf-8")
         return catalog

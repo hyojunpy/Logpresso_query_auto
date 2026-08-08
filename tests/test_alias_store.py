@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from app.services.alias_store import AliasStore
+import pytest
+
+from app.services.alias_store import AliasImportError, AliasStore
 
 
 def test_saves_and_updates_alias(tmp_path: Path):
@@ -24,3 +26,21 @@ def test_reports_conflicting_aliases_and_exports_csv(tmp_path: Path):
     exported = store.export_csv("ENT")
     assert exported.startswith("\ufeffphrase,target,kind,scope")
     assert "edge_firewall_logs" in exported
+
+
+def test_imports_valid_alias_csv_atomically(tmp_path: Path):
+    store = AliasStore(tmp_path / "aliases.db")
+    count = store.import_csv_bytes("phrase,target,kind,scope\n방화벽,firewall_logs,table,ENT\n출발지,src_ip,field,\n".encode())
+
+    assert count == 2
+    assert {item["target"] for item in store.list("ENT")} == {"firewall_logs", "src_ip"}
+
+
+def test_rejects_invalid_alias_csv_without_partial_write(tmp_path: Path):
+    store = AliasStore(tmp_path / "aliases.db")
+    store.save("기존", "existing_table")
+
+    with pytest.raises(AliasImportError, match="row 3"):
+        store.import_csv_bytes("phrase,target,kind\n방화벽,firewall_logs,table\n잘못,bad,unknown\n".encode())
+
+    assert [item["target"] for item in store.list()] == ["existing_table"]

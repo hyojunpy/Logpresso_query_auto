@@ -54,6 +54,14 @@ table_name,field_name,field_type,description
 
 Review and publish a new catalog version through a catalog administrator.
 
+## File-Based Alias Exchange
+
+Business aliases can be exchanged as UTF-8 CSV with `phrase,target` headers.
+Optional `kind` is `table` or `field`; optional `scope` limits an alias to a
+product group. Import validates every row before writing, rejects duplicate
+`phrase/kind/scope` keys, and applies no partial update on error. The API is
+`POST /api/v1/aliases/import/csv` with `Content-Type: text/csv`.
+
 ## Future Non-Production Verification
 
 `app.services.verification_adapter` defines a dry-run-only contract and ships
