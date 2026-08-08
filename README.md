@@ -160,6 +160,10 @@ docker compose up --build
 
 `docs`와 `data`는 컨테이너에 볼륨으로 연결됩니다. Docker 환경에서 Ollama를 호스트에서 실행 중이면 기본 `OLLAMA_BASE_URL`을 `http://host.docker.internal:11434`로 설정할 수 있습니다.
 
+새 데이터 폴더로 처음 기동한 경우에는 문서 인덱스가 아직 없어 `/api/v1/ready`가
+`503`을 반환합니다. UI의 재인덱싱 기능 또는 `POST /api/v1/documents/reindex`를 한
+번 실행하면 준비 상태가 `ready`가 됩니다.
+
 ## Streamlit 사용법
 
 1. 자연어 요청을 입력하고 `쿼리 생성`을 누릅니다.

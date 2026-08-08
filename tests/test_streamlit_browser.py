@@ -39,6 +39,7 @@ class StreamlitBrowserTest(unittest.TestCase):
             browser = playwright.chromium.launch()
             page = browser.new_page()
             page.goto(f"http://127.0.0.1:{self.port}/", wait_until="networkidle")
+            expect(page.get_by_text("생성 준비 상태:", exact=False)).to_be_visible()
             page.get_by_label(request_label, exact=True).fill("\uc5d0\ub7ec \ub85c\uadf8 \ubcf4\uc5ec\uc918")
             page.get_by_role("button", name=generate_label, exact=True).click()
             expect(page.get_by_label(clarification_label, exact=True)).to_be_visible()

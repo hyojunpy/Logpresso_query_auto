@@ -64,6 +64,14 @@ jobs:
           docker compose logs
           exit 1
 
+      - name: Verify readiness lifecycle without external calls
+        run: |
+          test "$(curl --silent --output /tmp/ready-before.json --write-out '%{http_code}' http://127.0.0.1:8000/api/v1/ready)" = "503"
+          grep --quiet 'document_index_not_ready' /tmp/ready-before.json
+          curl --fail --request POST http://127.0.0.1:8000/api/v1/documents/reindex
+          test "$(curl --silent --output /tmp/ready-after.json --write-out '%{http_code}' http://127.0.0.1:8000/api/v1/ready)" = "200"
+          grep --quiet '"status":"ready"' /tmp/ready-after.json
+
       - name: Stop compose services
         if: always()
         env:
