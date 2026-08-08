@@ -25,6 +25,7 @@ from app.services.query_validator import QueryValidator
 from app.services.retriever import Retriever
 from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
+from app.services.ollama_status import check_ollama
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -124,6 +125,18 @@ with st.sidebar:
     st.write(f"LLM provider: `{settings.llm_provider}`")
     st.write(f"LLM model: `{settings.ollama_model if settings.llm_provider == 'ollama' else settings.openai_model}`")
     st.caption("모델 변경은 `.env`의 `OLLAMA_MODEL` 또는 `OPENAI_MODEL`을 바꾼 뒤 서버를 재시작하면 적용됩니다.")
+    with st.expander("Ollama 상태 진단"):
+        st.caption(f"URL: {settings.ollama_base_url} | 모델: {settings.ollama_model}")
+        if st.button("Ollama 연결 점검"):
+            st.session_state["ollama_status"] = check_ollama(settings.ollama_base_url, settings.ollama_model)
+        if ollama_status := st.session_state.get("ollama_status"):
+            if ollama_status["status"] == "reachable":
+                st.success("Ollama 서버에 연결했습니다.")
+            else:
+                st.warning("Ollama 서버에 연결하지 못했습니다. 규칙 기반 생성은 계속 사용할 수 있습니다.")
+            st.json(ollama_status)
+        if last_error := st.session_state.get("response", {}).get("debug", {}).get("llm_error_type"):
+            st.caption(f"최근 LLM fallback 사유: {last_error}")
     feedback_summary = FeedbackStore(settings.db_path).summary()
     unresolved_outcomes = feedback_summary.get("unresolved_outcomes", {})
     if feedback_summary["total"] or unresolved_outcomes:
