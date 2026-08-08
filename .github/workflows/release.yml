@@ -38,6 +38,17 @@ jobs:
       - name: Run tests
         run: python -m pytest
 
+      - name: Run offline deployment preflight
+        env:
+          LLM_PROVIDER: mock
+        run: python scripts/check_deployment.py
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build release container image
+        run: docker build --tag logpresso-query-assistant:${{ github.ref_name }} .
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
