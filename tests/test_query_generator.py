@@ -489,6 +489,8 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.query, "table firewall_logs\n| rename src_ip as 할당ip")
         self.assertIn("rename", response.validation.commands)
         self.assertTrue(any(ref.entry_name == "rename" for ref in response.references))
+        explanation = next(item for item in response.explanation if item.command == "rename")
+        self.assertEqual(explanation.request_signal, "src_ip -> 할당ip")
 
     def test_rename_with_euro_ending_korean_particle_keeps_field_name(self):
         response = generator().generate(

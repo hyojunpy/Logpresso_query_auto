@@ -67,6 +67,8 @@ class QueryAnalysisResponse(BaseModel):
 class QueryExplanation(BaseModel):
     query_part: str
     reason: str
+    command: str | None = None
+    request_signal: str | None = None
 
 
 class QueryReference(BaseModel):

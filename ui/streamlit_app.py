@@ -644,7 +644,12 @@ if response:
         else:
             st.error("쿼리를 생성하지 못했습니다.")
     with tabs[1]:
-        st.json(response.get("explanation", []))
+        explanations = response.get("explanation", [])
+        if explanations:
+            st.dataframe(explanations, use_container_width=True, hide_index=True)
+            st.caption("문서 근거 탭에서 같은 명령어의 문법 근거와 옵션을 확인할 수 있습니다.")
+        else:
+            st.info("설명할 생성 쿼리가 없습니다.")
     with tabs[2]:
         render_validation_result("문법 검증 결과", response.get("validation") or {})
         schema = response.get("schema_validation") or {}

@@ -108,7 +108,7 @@ class QueryGenerator:
             schema_validation=self.catalog.validate_query(query, payload.context),
             quality=quality,
             execution_preview=preview,
-            explanation=self._explain(query),
+            explanation=self._explain(query, intent),
             references=references or references_from_results(results, "생성된 쿼리의 명령어와 옵션 근거입니다."),
             assumptions=[*intent.assumptions, *([llm_notice] if llm_notice else [])],
             debug={
@@ -197,7 +197,7 @@ class QueryGenerator:
             schema_validation=self.catalog.validate_query(query, payload.context),
             quality=quality,
             execution_preview=preview,
-            explanation=self._explain(query),
+            explanation=self._explain(query, intent),
             references=references or references_from_results(results, "LLM-assisted query context."),
             assumptions=list(dict.fromkeys(assumptions)),
             debug={
@@ -641,27 +641,34 @@ class QueryGenerator:
             return None
         return query.strip()
 
-    def _explain(self, query: str) -> list[QueryExplanation]:
+    def _explain(self, query: str, intent: QueryIntent) -> list[QueryExplanation]:
         explanations: list[QueryExplanation] = []
         for line in query.splitlines():
+            command = line.strip().lstrip("|").strip().split(maxsplit=1)[0].lower() if line.strip() else None
             if line.startswith("table"):
-                explanations.append(QueryExplanation(query_part=line, reason="지정한 테이블과 조회 기간으로 원본 로그를 읽습니다."))
+                signal = ", ".join(intent.tables) or "요청에서 명시한 테이블"
+                if intent.time_range and intent.time_range.duration:
+                    signal += f", 기간 {intent.time_range.duration}"
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=signal, reason="지정한 테이블과 조회 기간으로 원본 로그를 읽습니다."))
             elif line.startswith("fulltext"):
-                explanations.append(QueryExplanation(query_part=line, reason="지정한 문자열 또는 IP를 전체 텍스트 검색 문법으로 조회합니다."))
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=intent.fulltext_expression, reason="지정한 문자열 또는 IP를 전체 텍스트 검색 문법으로 조회합니다."))
             elif line.startswith("| search"):
-                explanations.append(QueryExplanation(query_part=line, reason="사용자 요청에서 추출한 필터 조건을 적용합니다."))
+                signal = ", ".join(f"{item.field} {item.operator} {item.value}" for item in [*intent.filters, *intent.post_filters]) or "요청에서 추출한 필터"
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=signal, reason="사용자 요청에서 추출한 필터 조건을 적용합니다."))
             elif line.startswith("| eval"):
-                explanations.append(QueryExplanation(query_part=line, reason="요청한 계산식을 새 필드로 생성합니다."))
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=", ".join(item.name for item in intent.computed_fields) or "요청한 계산 필드", reason="요청한 계산식을 새 필드로 생성합니다."))
             elif line.startswith("| rename"):
-                explanations.append(QueryExplanation(query_part=line, reason="요청한 원본 필드명을 새 표시 필드명으로 변경합니다."))
+                signal = ", ".join(f"{item.field} -> {item.new_name}" for item in intent.renames)
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=signal or "요청한 필드 이름 변경", reason="요청한 원본 필드명을 새 표시 필드명으로 변경합니다."))
             elif line.startswith("| fields"):
-                explanations.append(QueryExplanation(query_part=line, reason="요청한 필드만 출력하도록 결과 필드를 선택합니다."))
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=", ".join(intent.selected_fields) or "요청한 출력 필드", reason="요청한 필드만 출력하도록 결과 필드를 선택합니다."))
             elif line.startswith("| stats") or line.startswith("| timechart"):
-                explanations.append(QueryExplanation(query_part=line, reason="요청한 건수 집계 또는 시간 단위 집계를 수행합니다."))
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=", ".join(intent.group_by) or "요청한 집계 기준", reason="요청한 건수 집계 또는 시간 단위 집계를 수행합니다."))
             elif line.startswith("| rollup"):
-                explanations.append(QueryExplanation(query_part=line, reason="그룹별 집계와 전체 집계를 함께 계산합니다."))
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=", ".join(intent.group_by) or "요청한 집계 기준", reason="그룹별 집계와 전체 집계를 함께 계산합니다."))
             elif line.startswith("| sort") or line.startswith("| limit"):
-                explanations.append(QueryExplanation(query_part=line, reason="정렬 및 출력 건수 조건을 적용합니다."))
+                signal = f"상한 {intent.limit}건" if line.startswith("| limit") and intent.limit else "요청한 정렬"
+                explanations.append(QueryExplanation(query_part=line, command=command, request_signal=signal, reason="정렬 및 출력 건수 조건을 적용합니다."))
         return explanations
 
     def _provider(self) -> LLMProvider:
