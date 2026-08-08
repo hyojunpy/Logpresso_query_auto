@@ -21,6 +21,7 @@ class FieldLineage(BaseModel):
     input_fields: list[str]
     operation: Literal["source", "rename", "eval"]
     source_table: str | None = None
+    status: Literal["available", "ambiguous", "renamed", "excluded"] = "available"
 
 
 class ValidationResult(BaseModel):

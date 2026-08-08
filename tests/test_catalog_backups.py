@@ -64,3 +64,16 @@ def test_field_lineage_identifies_right_join_field_without_guessing_ambiguous_fi
     assert lineage["source_ip"].source_table == "firewall"
     assert lineage["employee_address"].source_table == "insa"
     assert lineage["common_ip"].source_table is None
+
+
+def test_join_output_collision_warns_and_fields_marks_lineage_excluded(tmp_path):
+    service = CatalogService(tmp_path / "catalog.json")
+    service.save(Catalog(source="manual", tables=[
+        CatalogTable(table_name="firewall", fields=[CatalogField(field_name="ip"), CatalogField(field_name="action")]),
+        CatalogTable(table_name="insa", fields=[CatalogField(field_name="ip"), CatalogField(field_name="employee_id")]),
+    ]))
+
+    result = service.validate_query("table firewall\n| join type=left _join_key [ table insa ]\n| fields action, employee_id", RequestContext())
+
+    assert "join_output_field_collision" in {item.code for item in result.warnings}
+    assert all(item.status == "excluded" for item in result.field_lineage if item.output_field == "ip")

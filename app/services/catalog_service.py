@@ -158,6 +158,7 @@ class CatalogService:
                 warnings.append(ValidationIssue(code="time_field_unverified", message="선택한 테이블에서 시간 차트에 사용할 시간 타입 필드를 확인하지 못했습니다.", severity="warning", suggestion="카탈로그에 time/datetime/timestamp 타입 필드를 등록하세요.", source="catalog"))
         errors.extend(self._function_type_errors(query, selected, catalog))
         errors.extend(self._join_key_type_errors(query, selected))
+        warnings.extend(self._join_output_collisions(query, selected))
         if context.request_catalog and context.request_catalog.tables:
             warnings.append(ValidationIssue(
                 code="request_schema_unverified",
@@ -197,7 +198,38 @@ class CatalogService:
             input_sources = set().union(*(aliases.get(field, origins.get(field, set())) for field in inputs)) if inputs else set()
             aliases[target] = input_sources
             lineage.append(FieldLineage(output_field=target, input_fields=inputs, operation="eval", source_table=next(iter(input_sources)) if len(input_sources) == 1 else None))
+        rename_sources = {source for source, _ in re.findall(r"\brename\s+([A-Za-z_][\w]*)\s+as\s+([A-Za-z_][\w]*)", query, flags=re.IGNORECASE)}
+        common_fields = set.intersection(*(set(field.field_name for field in table.fields) for table in tables)) if len(tables) > 1 else set()
+        for item in lineage:
+            if item.operation == "source" and item.output_field in common_fields and item.output_field not in rename_sources:
+                item.status = "ambiguous"
+            elif item.operation == "source" and item.output_field in rename_sources:
+                item.status = "renamed"
+        field_commands = re.findall(r"\|\s*fields\s+([^\n]+)", query, flags=re.IGNORECASE)
+        if field_commands:
+            selected_fields = set(re.findall(r"[A-Za-z_][\w]*", field_commands[-1]))
+            for item in lineage:
+                if item.output_field not in selected_fields:
+                    item.status = "excluded"
         return lineage
+
+    @staticmethod
+    def _join_output_collisions(query: str, tables: list[CatalogTable]) -> list[ValidationIssue]:
+        if len(tables) < 2 or not re.search(r"\b(?:stream)?join\b", query, flags=re.IGNORECASE):
+            return []
+        common_fields = set.intersection(*(set(field.field_name for field in table.fields) for table in tables))
+        renamed_sources = {source for source, _ in re.findall(r"\brename\s+([A-Za-z_][\w]*)\s+as\s+([A-Za-z_][\w]*)", query, flags=re.IGNORECASE)}
+        return [
+            ValidationIssue(
+                code="join_output_field_collision",
+                message=f"조인 결과에 '{field}' 필드가 여러 테이블에서 같은 이름으로 남습니다.",
+                severity="warning",
+                affected_field=field,
+                suggestion="조인 전 rename으로 한쪽 필드 이름을 바꾸거나, 조인 후 fields로 필요한 필드만 선택하세요.",
+                source="catalog",
+            )
+            for field in sorted(common_fields - renamed_sources)
+        ]
 
     @staticmethod
     def _tables(query: str) -> list[str]:
