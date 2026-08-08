@@ -26,6 +26,19 @@ class CatalogService:
             return None
         return Catalog.model_validate_json(self.path.read_text(encoding="utf-8"))
 
+    @staticmethod
+    def trust_summary(catalog: Catalog | None) -> dict[str, str | int]:
+        if catalog is None or not catalog.tables:
+            return {"label": "카탈로그 없음", "detail": "문서와 요청 힌트 중심으로만 검증합니다.", "table_count": 0}
+        details = {
+            "manual": ("관리자 등록", "관리자가 등록한 카탈로그입니다. 실제 변경 사항은 주기적으로 검토하세요."),
+            "fixture": ("테스트 fixture", "테스트·예제용 카탈로그입니다. 운영 스키마와 일치하는지 확인하세요."),
+            "external_sync": ("외부 동기화", "외부 동기화로 받은 카탈로그입니다. 동기화 시점과 권한을 확인하세요."),
+            "unknown": ("출처 미확인", "요청 힌트 또는 출처 미확인 정보입니다. 실제 존재 여부를 확정할 수 없습니다."),
+        }
+        label, detail = details[catalog.source]
+        return {"label": label, "detail": detail, "table_count": len(catalog.tables)}
+
     def save(self, catalog: Catalog) -> Catalog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():

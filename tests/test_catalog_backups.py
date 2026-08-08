@@ -15,6 +15,15 @@ def test_save_creates_backup_and_restore_recovers_previous_catalog(tmp_path):
     assert len(service.backups()) == 2
 
 
+def test_catalog_trust_summary_describes_source_without_claiming_schema_accuracy(tmp_path):
+    service = CatalogService(tmp_path / "catalog.json")
+    summary = service.trust_summary(Catalog(source="fixture", tables=[CatalogTable(table_name="sample")]))
+
+    assert summary["label"] == "테스트 fixture"
+    assert "운영 스키마" in summary["detail"]
+    assert service.trust_summary(None)["table_count"] == 0
+
+
 def test_restore_rejects_path_traversal(tmp_path):
     service = CatalogService(tmp_path / "catalog.json")
     try:

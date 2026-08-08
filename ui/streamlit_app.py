@@ -271,7 +271,12 @@ with st.sidebar:
     persisted_catalog = catalog_service.load() if uploaded_request_catalog is None else None
     active_catalog = uploaded_request_catalog or persisted_catalog
     if active_catalog:
-        st.caption(f"카탈로그: {len(active_catalog.tables)}개 테이블 ({active_catalog.source})")
+        trust = CatalogService.trust_summary(active_catalog)
+        source_column, version_column, updated_column = st.columns(3)
+        source_column.metric("카탈로그 출처", trust["label"])
+        version_column.metric("버전", active_catalog.catalog_version or "미지정")
+        updated_column.metric("갱신 시점", active_catalog.updated_at or "미기록")
+        st.caption(str(trust["detail"]))
         with st.expander("카탈로그 미리보기"):
             st.json(active_catalog.model_dump())
     else:
