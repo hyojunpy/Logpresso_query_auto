@@ -238,6 +238,19 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertIn('| search action == "deny"', response.query)
         self.assertTrue(response.query.endswith("| limit 10"))
 
+    def test_join_applies_explicit_output_fields_after_join(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="firewall_logs의 src_ip와 firewall_djt의 dst_ip를 src_ip를 기준으로 left join 하고 src_ip와 dst_ip만 보여줘",
+                context=RequestContext(
+                    known_tables=["firewall_logs", "firewall_djt"],
+                    known_fields=["src_ip", "dst_ip"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertTrue(response.query.endswith("| fields src_ip, dst_ip"))
+
     def test_join_applies_explicit_pre_join_filter_to_left_source(self):
         response = generator().generate(
             GenerateQueryRequest(
