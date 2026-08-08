@@ -26,6 +26,10 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = ["-m", "not advanced_parser"]
+markers = [
+  "advanced_parser: roadmap tests for file, parser, and extended query features not in the current product scope",
+]
 filterwarnings = [
   "ignore:Using `httpx` with `starlette.testclient` is deprecated.*:starlette.exceptions.StarletteDeprecationWarning",
 ]

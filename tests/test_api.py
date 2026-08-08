@@ -212,7 +212,7 @@ class ApiTest(unittest.TestCase):
 
         original_db_path = settings.db_path
         try:
-            with TemporaryDirectory() as tmp:
+            with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
                 settings.db_path = Path(tmp) / "empty.db"
                 response = self.client.post(
                     "/api/v1/query/generate",

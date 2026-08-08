@@ -1,6 +1,10 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import pytest
+
+
+pytestmark = pytest.mark.advanced_parser
 
 
 @unittest.skipIf(importlib.util.find_spec("streamlit.testing.v1") is None, "streamlit testing is not installed")

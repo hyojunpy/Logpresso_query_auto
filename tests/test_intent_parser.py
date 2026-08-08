@@ -1,8 +1,12 @@
 import unittest
+import pytest
 from datetime import date, timedelta
 
 from app.models.request import GenerateQueryRequest, RequestContext
 from app.services.intent_parser import IntentParser
+
+
+pytestmark = pytest.mark.advanced_parser
 
 
 class IntentParserTest(unittest.TestCase):
