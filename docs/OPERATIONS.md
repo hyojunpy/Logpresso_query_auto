@@ -69,3 +69,8 @@ with no-op and fixture mock adapters. It has no network client and never calls
 a Logpresso server. A customer-specific adapter may be implemented only after
 the target environment, authorization boundary, query retention policy, and
 acceptance tests are reviewed. Production query execution remains out of scope.
+
+When `ENABLE_DEV_EVALUATION=true`, the protected development endpoint
+`POST /api/v1/internal/verification/dry-run` demonstrates the contract using
+the no-op adapter. It always returns `external_call_made: false` and does not
+connect to Logpresso, even when a query is supplied.

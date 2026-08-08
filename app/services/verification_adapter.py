@@ -15,6 +15,7 @@ class VerificationResult(BaseModel):
     message: str
     diagnostics: list[str] = []
     external_call_made: bool = False
+    adapter: str = "noop"
 
 
 class QueryVerificationAdapter(Protocol):
@@ -26,6 +27,8 @@ class NoopVerificationAdapter:
         return VerificationResult(
             status="not_configured",
             message="External verification is not configured. No customer system was contacted.",
+            diagnostics=["Configure a customer-approved non-production adapter before verification."],
+            adapter="noop",
         )
 
 
@@ -34,6 +37,8 @@ class MockVerificationAdapter:
 
     def __init__(self, outcomes: dict[str, VerificationResult] | None = None):
         self.outcomes = outcomes or {}
+        self.calls: list[str] = []
 
     def verify_dry_run(self, query: str) -> VerificationResult:
-        return self.outcomes.get(query, VerificationResult(status="accepted", message="Mock dry-run accepted."))
+        self.calls.append(query)
+        return self.outcomes.get(query, VerificationResult(status="accepted", message="Mock dry-run accepted.", adapter="mock"))

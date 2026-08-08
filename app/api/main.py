@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from time import perf_counter
 from uuid import uuid4
 
-from app.api.routes import aliases, audit, catalog, documents, evaluations, feedback, generate, health
+from app.api.routes import aliases, audit, catalog, documents, evaluations, feedback, generate, health, verification
 from app.core.config import settings
 from app.core.logging import configure_request_logging
 
@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(aliases.router, prefix="/api/v1/aliases", tags=["aliases"])
     app.include_router(audit.router, prefix="/api/v1/internal/audit", tags=["internal"])
     app.include_router(evaluations.router, prefix="/api/v1/internal/evaluations", tags=["internal"])
+    app.include_router(verification.router, prefix="/api/v1/internal/verification", tags=["internal"])
     return app
 
 

@@ -13,3 +13,4 @@ def test_mock_verification_uses_fixture_outcome_without_io():
 
     assert adapter.verify_dry_run("bad").status == "rejected"
     assert adapter.verify_dry_run("table firewall_logs").status == "accepted"
+    assert adapter.calls == ["bad", "table firewall_logs"]
