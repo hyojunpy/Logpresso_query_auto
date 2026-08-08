@@ -172,6 +172,12 @@ with st.sidebar:
         st.error(str(error))
     uploaded_catalog = st.file_uploader("카탈로그 파일", type=["json", "csv"])
     st.caption("CSV 형식: table_name, field_name, field_type, description")
+    st.download_button(
+        "CSV 카탈로그 템플릿 다운로드",
+        data="table_name,field_name,field_type,description\nfirewall_logs,src_ip,ip,source address\nfirewall_logs,action,string,allow or deny\n",
+        file_name="logpresso-catalog-template.csv",
+        mime="text/csv",
+    )
     uploaded_request_catalog = load_uploaded_catalog(uploaded_catalog)
     persisted_catalog = catalog_service.load() if uploaded_request_catalog is None else None
     active_catalog = uploaded_request_catalog or persisted_catalog
