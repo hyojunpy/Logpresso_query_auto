@@ -1,7 +1,7 @@
 import csv
 import io
 
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import Response
 
 from app.core.config import settings
@@ -9,16 +9,15 @@ from app.models.request import CatalogUpsertRequest
 from app.models.request import Catalog
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.audit_store import AuditStore
-from app.core.management_access import audit_actor
+from app.core.management_access import audit_actor, require_management_access
 from fastapi import HTTPException
 from app.services.catalog_service import CatalogService
 
 router = APIRouter()
 
 
-@router.post("/import/csv", response_model=Catalog)
+@router.post("/import/csv", response_model=Catalog, dependencies=[Depends(require_management_access)])
 def import_catalog_csv(request: Request, content: str = Body(..., media_type="text/csv")):
-    """TODO: protect catalog administration with authentication/authorization."""
     try:
         catalog = catalog_from_csv_bytes(content.encode("utf-8"))
     except CatalogImportError as error:
@@ -28,9 +27,8 @@ def import_catalog_csv(request: Request, content: str = Body(..., media_type="te
     return saved
 
 
-@router.get("/export/csv", response_class=Response)
+@router.get("/export/csv", response_class=Response, dependencies=[Depends(require_management_access)])
 def export_catalog_csv(request: Request):
-    """TODO: require authentication before exporting operational catalog metadata."""
     catalog = CatalogService(settings.catalog_path).load()
     AuditStore(settings.db_path).record("catalog.export_csv", "catalog", actor=audit_actor(request), metadata={"table_count": len(catalog.tables) if catalog else 0})
     output = io.StringIO(newline="")
@@ -57,15 +55,13 @@ def export_catalog_csv(request: Request):
     )
 
 
-@router.get("/backups")
+@router.get("/backups", dependencies=[Depends(require_management_access)])
 def list_catalog_backups():
-    """TODO: restrict catalog history to catalog administrators."""
     return {"items": CatalogService(settings.catalog_path).backups()}
 
 
-@router.post("/backups/{name}/restore", response_model=Catalog)
+@router.post("/backups/{name}/restore", response_model=Catalog, dependencies=[Depends(require_management_access)])
 def restore_catalog_backup(request: Request, name: str):
-    """TODO: protect catalog restoration with authentication/authorization."""
     try:
         saved = CatalogService(settings.catalog_path).restore(name)
     except FileNotFoundError as error:
@@ -78,14 +74,12 @@ def restore_catalog_backup(request: Request, name: str):
 
 @router.get("", response_model=Catalog)
 def get_catalog():
-    """TODO: require authentication before exposing operational catalog metadata."""
     catalog = CatalogService(settings.catalog_path).load()
     return catalog or {"tables": [], "source": "unknown"}
 
 
-@router.put("", response_model=Catalog)
+@router.put("", response_model=Catalog, dependencies=[Depends(require_management_access)])
 def put_catalog(request: Request, payload: CatalogUpsertRequest = Body(...)):
-    """TODO: protect catalog administration with authentication/authorization."""
     saved = CatalogService(settings.catalog_path).save(payload.catalog)
     AuditStore(settings.db_path).record("catalog.upsert", "catalog", actor=audit_actor(request), metadata={"table_count": len(saved.tables), "source": saved.source})
     return saved

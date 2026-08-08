@@ -1,8 +1,9 @@
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.config import BASE_DIR, settings
+from app.core.management_access import require_management_access
 from app.models.request import Catalog, GenerateQueryRequest, RequestContext
 from app.services.indexer import DocumentIndex
 from app.services.query_generator import QueryGenerator
@@ -11,7 +12,7 @@ from app.services.retriever import Retriever
 router = APIRouter()
 
 
-@router.post("/gold-set")
+@router.post("/gold-set", dependencies=[Depends(require_management_access)])
 def run_gold_set():
     """Development-only evaluation endpoint; enable explicitly with ENABLE_DEV_EVALUATION=true."""
     if not settings.enable_dev_evaluation:

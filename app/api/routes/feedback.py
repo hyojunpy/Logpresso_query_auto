@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
 
 from app.core.config import settings
+from app.core.management_access import require_management_access
 from app.models.request import FeedbackRequest
 from app.models.response import (
     FeedbackSaveResponse,
@@ -18,19 +19,16 @@ def create_feedback(payload: FeedbackRequest = Body(...)):
     return FeedbackStore(settings.db_path).save(payload)
 
 
-@router.get("/summary", response_model=FeedbackSummaryResponse)
+@router.get("/summary", response_model=FeedbackSummaryResponse, dependencies=[Depends(require_management_access)])
 def feedback_summary():
-    """TODO: protect feedback reporting with authentication in shared deployments."""
     return FeedbackStore(settings.db_path).summary()
 
 
-@router.get("/improvement-candidates", response_model=ImprovementCandidatesResponse)
+@router.get("/improvement-candidates", response_model=ImprovementCandidatesResponse, dependencies=[Depends(require_management_access)])
 def improvement_candidates():
-    """TODO: protect reporting endpoints with authentication in shared deployments."""
     return {"items": FeedbackStore(settings.db_path).improvement_candidates()}
 
 
-@router.get("/improvement-report", response_model=ImprovementReportResponse)
+@router.get("/improvement-report", response_model=ImprovementReportResponse, dependencies=[Depends(require_management_access)])
 def improvement_report():
-    """TODO: protect reporting endpoints with authentication in shared deployments."""
     return FeedbackStore(settings.db_path).improvement_report()

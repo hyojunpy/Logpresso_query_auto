@@ -26,6 +26,8 @@ class Settings:
     enable_llm_intent_fallback: bool = os.getenv("ENABLE_LLM_INTENT_FALLBACK", "true").lower() in {"1", "true", "yes"}
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}
+    # Optional shared-deployment boundary. Leave unset for local single-user use.
+    management_api_key: str | None = os.getenv("MANAGEMENT_API_KEY") or None
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     cors_allowed_origins: tuple[str, ...] = tuple(
         origin.strip()

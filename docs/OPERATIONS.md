@@ -33,6 +33,16 @@ actor identifier, small metadata such as table count, and timestamp in the
 local `management_audit` SQLite table. Request text, generated queries, and log
 content are intentionally excluded from this audit trail.
 
+## Optional API Key Guard
+
+For a small shared deployment without an upstream proxy, set
+`MANAGEMENT_API_KEY` to a high-entropy secret. Catalog import/export/update,
+catalog backup restore, aliases, feedback reports, audit records, and the
+development Gold Set endpoint then require the matching
+`X-Management-API-Key` header. Query generation, validation, feedback
+submission, health checks, and catalog reads remain available. This is a
+deployment guard, not a replacement for customer-managed role-based access.
+
 ## File-Based Catalog Exchange
 
 When direct access to a customer Logpresso server is unavailable, accept a

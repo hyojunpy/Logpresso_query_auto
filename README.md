@@ -104,6 +104,7 @@ LOG_LEVEL=INFO
 CORS_ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
 ENABLE_DEV_EVALUATION=false
 ENABLE_LLM_INTENT_FALLBACK=true
+MANAGEMENT_API_KEY=
 ```
 
 `LLM_PROVIDER` 값:
@@ -275,6 +276,7 @@ $env:RUN_BROWSER_TESTS = "1"
 
 - 이 애플리케이션은 Logpresso, DB, FTP, SFTP 등에 실제로 연결하거나 쿼리를 실행하지 않습니다.
 - API 인증 체계는 아직 제공하지 않습니다. 카탈로그 관리 API를 외부에 노출하기 전 인증 및 권한 제어를 추가해야 합니다.
+- 간단한 공유 환경에서는 `MANAGEMENT_API_KEY`를 설정하고 관리 API 요청에 `X-Management-API-Key` 헤더를 전달할 수 있습니다. 고객사 IdP 또는 리버스 프록시의 역할 기반 접근 제어를 대체하지는 않습니다.
 - 피드백 저장소는 기본적으로 원문 요청과 생성 쿼리를 저장하지 않습니다.
 - `docs/로그프레소 쿼리.docx`의 공개 및 재배포 권한은 별도로 확인해야 합니다.
 
