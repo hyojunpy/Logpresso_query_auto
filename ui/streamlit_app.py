@@ -269,6 +269,19 @@ with st.sidebar:
                 st.session_state["catalog_comparison"] = comparison
             if comparison := st.session_state.get("catalog_comparison"):
                 st.json(comparison)
+            restore_confirmed = st.checkbox(
+                "현재 카탈로그를 선택한 백업으로 교체합니다. 현재 버전은 새 백업으로 보관됩니다.",
+                key="catalog_restore_confirmed",
+            )
+            if st.button("선택한 백업 복원", disabled=not restore_confirmed):
+                try:
+                    restored = catalog_service.restore(backup_name)
+                except (FileNotFoundError, ValueError) as error:
+                    st.error(f"카탈로그 복원에 실패했습니다: {error}")
+                else:
+                    st.session_state.pop("catalog_comparison", None)
+                    st.success(f"{len(restored.tables)}개 테이블 카탈로그를 복원했습니다.")
+                    st.rerun()
         st.download_button(
             "카탈로그 JSON 다운로드",
             data=(active_catalog or Catalog(source="unknown")).model_dump_json(indent=2),

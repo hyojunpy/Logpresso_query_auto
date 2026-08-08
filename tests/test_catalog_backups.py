@@ -12,6 +12,7 @@ def test_save_creates_backup_and_restore_recovers_previous_catalog(tmp_path):
     assert len(backups) == 1
     restored = service.restore(backups[0]["name"])
     assert restored.tables[0].table_name == "first"
+    assert len(service.backups()) == 2
 
 
 def test_restore_rejects_path_traversal(tmp_path):
