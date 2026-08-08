@@ -1,6 +1,7 @@
 import json
 import hashlib
 import re
+import csv
 from datetime import datetime, timezone
 
 import streamlit as st
@@ -31,6 +32,9 @@ def load_uploaded_catalog(uploaded_file) -> Catalog | None:
     if uploaded_file is None:
         return None
     try:
+        if uploaded_file.name.lower().endswith(".csv"):
+            rows = list(csv.DictReader(uploaded_file.getvalue().decode("utf-8-sig").splitlines()))
+            return catalog_from_rows(rows, None)
         return Catalog.model_validate_json(uploaded_file.getvalue())
     except ValueError:
         st.sidebar.error("카탈로그 JSON 형식이 올바르지 않습니다.")
@@ -166,7 +170,8 @@ with st.sidebar:
     except ValueError as error:
         request_schema_catalog = None
         st.error(str(error))
-    uploaded_catalog = st.file_uploader("카탈로그 JSON", type=["json"])
+    uploaded_catalog = st.file_uploader("카탈로그 파일", type=["json", "csv"])
+    st.caption("CSV 형식: table_name, field_name, field_type, description")
     uploaded_request_catalog = load_uploaded_catalog(uploaded_catalog)
     persisted_catalog = catalog_service.load() if uploaded_request_catalog is None else None
     active_catalog = uploaded_request_catalog or persisted_catalog
