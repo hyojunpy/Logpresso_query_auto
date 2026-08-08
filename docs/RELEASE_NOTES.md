@@ -9,6 +9,9 @@
 - Added session-only Ollama comparison history and clearer validation summaries.
 - Isolated Compose test data through `LOGPRESSO_DATA_DIR` so CI and local
   integration checks do not modify operational `data/` files.
+- Added readiness diagnostics, catalog backup comparisons, alias conflict
+  diagnostics/export, hashed non-success generation counters, field lineage
+  display, and a dry-run-only verification adapter contract.
 
 ## Verification
 

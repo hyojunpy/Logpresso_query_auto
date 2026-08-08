@@ -32,13 +32,28 @@ class FeedbackStore:
         if not self.db_path.exists():
             return {"total": 0, "ratings": {}, "issue_types": {}}
         with sqlite3.connect(self.db_path) as conn:
+            self._ensure_outcomes(conn)
+            unresolved = dict(conn.execute("select result_status, count(*) from generation_outcome where result_status != 'generated' group by result_status").fetchall())
             exists = conn.execute("select 1 from sqlite_master where type = 'table' and name = 'query_feedback'").fetchone()
             if not exists:
-                return {"total": 0, "ratings": {}, "issue_types": {}}
+                return {"total": 0, "ratings": {}, "issue_types": {}, "unresolved_outcomes": unresolved}
             ratings = dict(conn.execute("select rating, count(*) from query_feedback group by rating").fetchall())
             issues = dict(conn.execute("select issue_type, count(*) from query_feedback where issue_type is not null group by issue_type").fetchall())
             total = conn.execute("select count(*) from query_feedback").fetchone()[0]
-        return {"total": total, "ratings": ratings, "issue_types": issues}
+        return {"total": total, "ratings": ratings, "issue_types": issues, "unresolved_outcomes": unresolved}
+
+    def record_generation_outcome(self, request_text: str, result_status: str) -> None:
+        """Retain only a hash and non-success status for evaluation prioritization."""
+        if result_status == "generated":
+            return
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure_outcomes(conn)
+            conn.execute(
+                "insert into generation_outcome(request_hash, result_status, created_at) values (?, ?, ?)",
+                (self._hash(request_text), result_status, datetime.now(UTC).isoformat()),
+            )
+            conn.commit()
 
     def improvement_candidates(self) -> list[dict[str, str | int]]:
         summary = self.summary()
@@ -65,6 +80,7 @@ class FeedbackStore:
             "issue_types": summary["issue_types"],
             "candidates": candidates,
             "priority_issue_types": [item["issue_type"] for item in candidates],
+            "unresolved_outcomes": summary.get("unresolved_outcomes", {}),
         }
 
     @staticmethod
@@ -80,3 +96,7 @@ class FeedbackStore:
         masked = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[EMAIL]", masked)
         masked = re.sub(r"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b", "[IP]", masked)
         return masked[:1000]
+
+    @staticmethod
+    def _ensure_outcomes(conn: sqlite3.Connection) -> None:
+        conn.execute("create table if not exists generation_outcome (id integer primary key, request_hash text not null, result_status text not null, created_at text not null)")

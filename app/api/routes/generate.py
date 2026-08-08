@@ -11,6 +11,7 @@ from app.services.catalog_service import CatalogService
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.retriever import Retriever
+from app.services.feedback_store import FeedbackStore
 
 router = APIRouter()
 
@@ -63,7 +64,9 @@ VALIDATE_EXAMPLES = {
 
 @router.post("/query/generate", response_model=GenerateQueryResponse)
 def generate_query(payload: GenerateQueryRequest = Body(..., openapi_examples=GENERATE_EXAMPLES)):
-    return QueryGenerator(_retriever()).generate(payload)
+    response = QueryGenerator(_retriever()).generate(payload)
+    FeedbackStore(settings.db_path).record_generation_outcome(payload.request, response.status)
+    return response
 
 
 @router.post("/query/validate", response_model=ValidationResult)

@@ -60,6 +60,16 @@ def list_catalog_backups():
     return {"items": CatalogService(settings.catalog_path).backups()}
 
 
+@router.get("/backups/{name}/compare", dependencies=[Depends(require_management_access)])
+def compare_catalog_backup(name: str):
+    try:
+        return CatalogService(settings.catalog_path).compare_backup(name)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="catalog backup not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="invalid catalog backup name") from error
+
+
 @router.post("/backups/{name}/restore", response_model=Catalog, dependencies=[Depends(require_management_access)])
 def restore_catalog_backup(request: Request, name: str):
     try:

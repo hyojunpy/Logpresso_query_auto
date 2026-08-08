@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app.models.request import Catalog, CatalogField, CatalogTable, RequestContext
-from app.models.response import ValidationIssue, ValidationResult
+from app.models.response import FieldLineage, ValidationIssue, ValidationResult
 
 
 class CatalogAdapter(Protocol):
@@ -54,6 +54,33 @@ class CatalogService:
             raise FileNotFoundError(name)
         catalog = Catalog.model_validate_json(backup.read_text(encoding="utf-8"))
         return self.save(catalog)
+
+    def compare_backup(self, name: str) -> dict[str, object]:
+        """Compare a backup with the current catalog without changing either file."""
+        if Path(name).name != name or not re.fullmatch(r"catalog-\d{8}T\d{12}Z\.json", name):
+            raise ValueError("invalid catalog backup name")
+        backup = self.backup_dir / name
+        if not backup.exists():
+            raise FileNotFoundError(name)
+        previous = Catalog.model_validate_json(backup.read_text(encoding="utf-8"))
+        current = self.load() or Catalog(source="unknown")
+        previous_tables = {table.table_name: table for table in previous.tables}
+        current_tables = {table.table_name: table for table in current.tables}
+        shared = sorted(previous_tables.keys() & current_tables.keys())
+        changed_tables = []
+        for table_name in shared:
+            before = {field.field_name for field in previous_tables[table_name].fields}
+            after = {field.field_name for field in current_tables[table_name].fields}
+            added_fields = sorted(after - before)
+            removed_fields = sorted(before - after)
+            if added_fields or removed_fields:
+                changed_tables.append({"table_name": table_name, "added_fields": added_fields, "removed_fields": removed_fields})
+        return {
+            "backup": name,
+            "added_tables": sorted(current_tables.keys() - previous_tables.keys()),
+            "removed_tables": sorted(previous_tables.keys() - current_tables.keys()),
+            "changed_tables": changed_tables,
+        }
 
     def resolve(self, context: RequestContext) -> Catalog | None:
         base_catalog = context.catalog or self.load()
@@ -135,7 +162,28 @@ class CatalogService:
                 suggestion="운영 카탈로그를 등록하면 테이블별 필드와 타입을 더 엄격하게 검증할 수 있습니다.",
                 source="catalog",
             ))
-        return ValidationResult(valid=not errors, errors=errors, warnings=warnings, compatibility_notes=[f"Catalog source: {catalog.source}"])
+        return ValidationResult(
+            valid=not errors,
+            errors=errors,
+            warnings=warnings,
+            compatibility_notes=[f"Catalog source: {catalog.source}"],
+            field_lineage=self._field_lineage(query, selected),
+        )
+
+    @staticmethod
+    def _field_lineage(query: str, tables: list[CatalogTable]) -> list[FieldLineage]:
+        """Surface simple provenance; this is informational, never a query rewrite."""
+        source_table = tables[0].table_name if tables else None
+        lineage: list[FieldLineage] = []
+        for table in tables:
+            for field in table.fields:
+                lineage.append(FieldLineage(output_field=field.field_name, input_fields=[field.field_name], operation="source", source_table=table.table_name))
+        for source, target in re.findall(r"\brename\s+([A-Za-z_][\w]*)\s+as\s+([A-Za-z_][\w]*)", query, flags=re.IGNORECASE):
+            lineage.append(FieldLineage(output_field=target, input_fields=[source], operation="rename", source_table=source_table))
+        for target, expression in re.findall(r"\beval\s+([A-Za-z_][\w]*)\s*=\s*([^\n|]+)", query, flags=re.IGNORECASE):
+            inputs = re.findall(r"\b[A-Za-z_][\w]*\b", expression)
+            lineage.append(FieldLineage(output_field=target, input_fields=inputs, operation="eval", source_table=source_table))
+        return lineage
 
     @staticmethod
     def _tables(query: str) -> list[str]:

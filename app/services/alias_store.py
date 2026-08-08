@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import csv
+import io
 from pathlib import Path
 
 
@@ -32,6 +34,26 @@ class AliasStore:
             self._ensure(conn)
             deleted = conn.execute("delete from query_alias where phrase=? and kind=? and scope=?", (phrase, kind, scope)).rowcount
         return bool(deleted)
+
+    def diagnostics(self) -> list[dict[str, object]]:
+        """Report ambiguous vocabulary without changing alias resolution behavior."""
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure(conn)
+            rows = conn.execute(
+                "select phrase, kind, group_concat(distinct target), count(distinct target) "
+                "from query_alias group by phrase, kind having count(distinct target) > 1"
+            ).fetchall()
+        return [
+            {"code": "alias_conflict", "phrase": phrase, "kind": kind, "targets": targets.split(","), "count": count}
+            for phrase, kind, targets, count in rows
+        ]
+
+    def export_csv(self, scope: str | None = None) -> str:
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=["phrase", "target", "kind", "scope"])
+        writer.writeheader()
+        writer.writerows(self.list(scope))
+        return "\ufeff" + output.getvalue()
 
     @staticmethod
     def _ensure(conn: sqlite3.Connection) -> None:

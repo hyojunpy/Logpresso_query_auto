@@ -22,3 +22,15 @@ def test_masks_common_personal_and_credential_values_in_stored_comment(tmp_path)
     with sqlite3.connect(tmp_path / "feedback.db") as conn:
         comment = conn.execute("select feedback_comment from query_feedback").fetchone()[0]
     assert comment == "contact [EMAIL] from [IP] Bearer [REDACTED]"
+
+
+def test_records_only_hashed_unsuccessful_generation_outcomes(tmp_path):
+    store = FeedbackStore(tmp_path / "feedback.db")
+    store.record_generation_outcome("internal request", "needs_clarification")
+    store.record_generation_outcome("successful request", "generated")
+
+    report = store.improvement_report()
+
+    assert report["unresolved_outcomes"] == {"needs_clarification": 1}
+    with sqlite3.connect(tmp_path / "feedback.db") as conn:
+        assert conn.execute("select request_hash, result_status from generation_outcome").fetchall()[0][1] == "needs_clarification"

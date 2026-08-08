@@ -138,6 +138,10 @@ with st.sidebar:
     st.write(f"문서 인덱스: {'완료' if status['indexed'] else '미생성'}")
     st.write(f"문서 변경됨: {'예' if status['stale'] else '아니오'}")
     st.write(f"청크 수: {status['chunk_count']}")
+    if settings.doc_path.exists() and status["indexed"] and not status["stale"] and status["chunk_count"]:
+        st.success("생성 준비 상태: 준비됨")
+    else:
+        st.warning("생성 준비 상태: 기준 문서 또는 인덱스를 확인하세요.")
     product = st.selectbox("제품군", ["ENT", "STD", "SNR", "FRS"], index=0)
     generation_mode = st.selectbox(
         "생성 모드",
@@ -165,8 +169,18 @@ with st.sidebar:
                 st.success("별칭을 저장했습니다.")
                 st.rerun()
         aliases = alias_store.list(product)
+        conflicts = alias_store.diagnostics()
+        if conflicts:
+            st.warning("같은 업무 표현이 여러 대상으로 등록되어 있습니다.")
+            st.dataframe(conflicts, use_container_width=True, hide_index=True)
         if aliases:
             st.dataframe(aliases, use_container_width=True, hide_index=True)
+            st.download_button(
+                "별칭 CSV 다운로드",
+                data=alias_store.export_csv(product),
+                file_name="logpresso-aliases.csv",
+                mime="text/csv",
+            )
             alias_to_delete = st.selectbox("삭제할 별칭", [""] + [f"{item['kind']}: {item['phrase']}" for item in aliases])
             if st.button("선택 별칭 삭제") and alias_to_delete:
                 kind, phrase = alias_to_delete.split(": ", 1)
@@ -243,6 +257,14 @@ with st.sidebar:
             else:
                 st.success(f"{len(saved_catalog.tables)}개 테이블 카탈로그를 저장했습니다.")
                 st.rerun()
+        backups = catalog_service.backups()
+        if backups:
+            backup_name = st.selectbox("비교할 카탈로그 백업", [item["name"] for item in backups])
+            if st.button("현재 카탈로그와 비교"):
+                comparison = catalog_service.compare_backup(backup_name)
+                st.session_state["catalog_comparison"] = comparison
+            if comparison := st.session_state.get("catalog_comparison"):
+                st.json(comparison)
         st.download_button(
             "카탈로그 JSON 다운로드",
             data=(active_catalog or Catalog(source="unknown")).model_dump_json(indent=2),
@@ -461,6 +483,7 @@ def generate(text: str, *, clear_answer: bool = True) -> None:
         response = generator.generate(payload)
     finally:
         settings.ollama_timeout_seconds = original_timeout
+    FeedbackStore(settings.db_path).record_generation_outcome(enriched_text, response.status)
     st.session_state["request_text"] = text
     st.session_state["response"] = response.model_dump()
     st.session_state["response_fingerprint"] = request_fingerprint(text, context)
@@ -573,6 +596,9 @@ if response:
         preview = response.get("execution_preview") or {}
         if schema:
             render_validation_result("스키마 검증 결과", schema)
+            if lineage := schema.get("field_lineage"):
+                with st.expander("필드 계보"):
+                    st.dataframe(lineage, use_container_width=True, hide_index=True)
         else:
             st.info("카탈로그가 제공되지 않아 문법 중심으로만 검증했습니다. 실제 테이블/필드 카탈로그를 추가하면 검증 범위가 넓어집니다.")
         st.subheader("쿼리 품질 진단")

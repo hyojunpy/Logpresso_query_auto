@@ -18,7 +18,9 @@ included in the default CI suite.
 2. Add file source handling for CSV, JSON, TSV, EVTX, and ZIP only after a
    customer security review defines upload scanning and retention policies.
 3. Add structured data extraction commands with fixture-driven syntax tests.
-4. Extend field lineage across joins, aliases, and computed fields.
+4. Extend field lineage across joins, aliases, and computed fields. Start by
+   surfacing rename/eval provenance in validation output before treating it as
+   a hard schema rule.
 5. Add differential tests against a non-production Logpresso environment when
    customer access is available. This project must not connect to a customer
    server by default.

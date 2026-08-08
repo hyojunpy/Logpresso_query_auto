@@ -53,3 +53,11 @@ table_name,field_name,field_type,description
 ```
 
 Review and publish a new catalog version through a catalog administrator.
+
+## Future Non-Production Verification
+
+`app.services.verification_adapter` defines a dry-run-only contract and ships
+with no-op and fixture mock adapters. It has no network client and never calls
+a Logpresso server. A customer-specific adapter may be implemented only after
+the target environment, authorization boundary, query retention policy, and
+acceptance tests are reviewed. Production query execution remains out of scope.

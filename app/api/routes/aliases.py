@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -19,6 +20,20 @@ class AliasUpsert(BaseModel):
 @router.get("", dependencies=[Depends(require_management_access)])
 def list_aliases(scope: str = Query(default="")):
     return {"items": AliasStore(settings.db_path).list(scope or None)}
+
+
+@router.get("/diagnostics", dependencies=[Depends(require_management_access)])
+def alias_diagnostics():
+    return {"items": AliasStore(settings.db_path).diagnostics()}
+
+
+@router.get("/export/csv", response_class=Response, dependencies=[Depends(require_management_access)])
+def export_aliases(scope: str = Query(default="")):
+    return Response(
+        content=AliasStore(settings.db_path).export_csv(scope or None),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="logpresso-aliases.csv"'},
+    )
 
 
 @router.post("", dependencies=[Depends(require_management_access)])

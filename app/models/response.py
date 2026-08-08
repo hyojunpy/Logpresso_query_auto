@@ -16,6 +16,13 @@ class ValidationIssue(BaseModel):
     source: Literal["syntax", "documentation", "catalog", "policy"] = "syntax"
 
 
+class FieldLineage(BaseModel):
+    output_field: str
+    input_fields: list[str]
+    operation: Literal["source", "rename", "eval"]
+    source_table: str | None = None
+
+
 class ValidationResult(BaseModel):
     valid: bool
     errors: list[ValidationIssue] = []
@@ -25,6 +32,7 @@ class ValidationResult(BaseModel):
     risk_level: Literal["low", "medium", "high", "critical"] = "low"
     requires_admin: bool = False
     compatibility_notes: list[str] = []
+    field_lineage: list[FieldLineage] = []
 
 
 class QueryQualityResult(BaseModel):
