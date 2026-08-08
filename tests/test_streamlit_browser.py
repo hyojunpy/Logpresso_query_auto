@@ -45,6 +45,8 @@ class StreamlitBrowserTest(unittest.TestCase):
             page.get_by_label(clarification_label, exact=True).fill("\ud14c\uc774\ube14\uc740 firewall_logs, \uc5d0\ub7ec \ud544\ub4dc\ub294 message, \uae30\uac04\uc740 \ucd5c\uadfc 24\uc2dc\uac04")
             page.get_by_role("button", name="\ub2f5\ubcc0\uc744 \ubc18\uc601\ud574 \ub2e4\uc2dc \uc0dd\uc131", exact=True).click()
             expect(page.locator("code").filter(has_text="table duration=24h firewall_logs")).to_be_visible()
+            page.get_by_role("button", name="\uc218\uc815 \ucffc\ub9ac \uc7ac\uac80\uc99d", exact=True).click()
+            expect(page.get_by_role("button", name="\uc774 \uc218\uc815 \uae30\uc900\uc744 \uc774\ubc88 \uc138\uc158\uc5d0 \uae30\uc5b5", exact=True)).to_be_visible()
             page.get_by_role("tab", name="\uac80\uc99d", exact=True).click()
             expect(page.get_by_text("\uc2e4\ud589 \uc900\ube44 \uc0c1\ud0dc", exact=True)).to_be_visible()
             page.get_by_role("tab", name="\uad6c\uc870", exact=True).click()
