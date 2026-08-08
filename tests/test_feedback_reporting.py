@@ -33,5 +33,6 @@ def test_records_only_hashed_unsuccessful_generation_outcomes(tmp_path):
 
     assert report["unresolved_outcomes"] == {"needs_clarification": 1}
     assert store.summary()["unresolved_outcomes"] == {"needs_clarification": 1}
+    assert store.gold_set_suggestions()[0]["signal"] == "needs_clarification"
     with sqlite3.connect(tmp_path / "feedback.db") as conn:
         assert conn.execute("select request_hash, result_status from generation_outcome").fetchall()[0][1] == "needs_clarification"

@@ -127,3 +127,4 @@ class ImprovementReportResponse(BaseModel):
     candidates: list[ImprovementCandidate]
     priority_issue_types: list[str]
     unresolved_outcomes: dict[str, int] = {}
+    gold_set_suggestions: list[dict[str, str | int]] = []

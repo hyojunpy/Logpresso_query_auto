@@ -346,6 +346,10 @@ with st.sidebar:
     if settings.enable_dev_evaluation:
         with st.expander("개발용 Gold Set 평가"):
             st.caption("fixture 기반 평가이며 외부 Logpresso 시스템에 연결하지 않습니다.")
+            suggestions = FeedbackStore(settings.db_path).gold_set_suggestions()
+            if suggestions:
+                st.caption("원문 없이 집계한 피드백 기반 시나리오 제안")
+                st.dataframe(suggestions, use_container_width=True, hide_index=True)
             if st.button("Gold Set 실행"):
                 st.session_state["gold_set_result"] = run_gold_set(settings.db_path, settings.docs_dir.parent / "tests" / "fixtures" / "gold_set.json")
             if result := st.session_state.get("gold_set_result"):

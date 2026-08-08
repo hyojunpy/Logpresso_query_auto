@@ -81,7 +81,28 @@ class FeedbackStore:
             "candidates": candidates,
             "priority_issue_types": [item["issue_type"] for item in candidates],
             "unresolved_outcomes": summary.get("unresolved_outcomes", {}),
+            "gold_set_suggestions": self.gold_set_suggestions(),
         }
+
+    def gold_set_suggestions(self) -> list[dict[str, str | int]]:
+        """Suggest fixture categories from aggregate metadata only, never raw requests."""
+        summary = self.summary()
+        templates = {
+            "wrong_table": ("테이블 해석 회귀", "업무 별칭과 명시 테이블명이 함께 있을 때 명시 이름을 우선하는 시나리오"),
+            "wrong_field": ("필드 해석 회귀", "동일 의미의 업무 표현과 실제 필드명을 매핑하는 시나리오"),
+            "wrong_time_range": ("기간 해석 회귀", "상대 기간과 절대 기간 표현을 구분하는 시나리오"),
+            "invalid_syntax": ("문법 회귀", "문서 근거 명령어와 옵션 조합을 검증하는 시나리오"),
+            "unsafe_query": ("안전 정책 회귀", "기간·limit·관리 명령 진단을 확인하는 시나리오"),
+            "irrelevant_query": ("의도 분류 회귀", "확인 질문 또는 unsupported가 필요한 모호한 요청 시나리오"),
+            "needs_clarification": ("확인 질문 회귀", "정보 부족 요청이 안전하게 clarification으로 분류되는 시나리오"),
+            "unsupported": ("지원 범위 회귀", "문서 근거가 없는 요청이 unsupported로 유지되는 시나리오"),
+        }
+        counts = {**summary["issue_types"], **summary.get("unresolved_outcomes", {})}
+        return [
+            {"signal": signal, "count": count, "title": templates[signal][0], "scenario": templates[signal][1]}
+            for signal, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+            if signal in templates
+        ]
 
     @staticmethod
     def _hash(value: str) -> str:
