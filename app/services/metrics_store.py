@@ -5,6 +5,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
+def metric_label(metric: str) -> str:
+    labels = {
+        "generation_generated": "쿼리 생성 완료",
+        "generation_needs_clarification": "추가 정보 요청",
+        "generation_unsupported": "지원하지 않는 요청",
+        "generation_llm_fallback": "LLM fallback 사용",
+    }
+    if metric in labels:
+        return labels[metric]
+    if metric.startswith("http_status_"):
+        return f"HTTP {metric.removeprefix('http_status_')} 응답"
+    return metric
+
+
 class MetricsStore:
     """Stores aggregate counters only; never records request, query, or IP data."""
     def __init__(self, db_path: Path, retention_days: int = 30):

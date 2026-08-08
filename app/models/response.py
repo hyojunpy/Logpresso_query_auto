@@ -128,3 +128,16 @@ class ImprovementReportResponse(BaseModel):
     priority_issue_types: list[str]
     unresolved_outcomes: dict[str, int] = {}
     gold_set_suggestions: list[dict[str, str | int]] = []
+
+
+class OperationalMetricItem(BaseModel):
+    metric: str
+    label: str
+    count: int
+
+
+class OperationalMetricsResponse(BaseModel):
+    metrics: dict[str, int]
+    items: list[OperationalMetricItem]
+    retention_days: int
+    contains_raw_content: bool = False

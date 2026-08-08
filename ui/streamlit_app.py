@@ -26,7 +26,7 @@ from app.services.retriever import Retriever
 from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
 from app.services.ollama_status import check_ollama
-from app.services.metrics_store import MetricsStore
+from app.services.metrics_store import MetricsStore, metric_label
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -347,7 +347,17 @@ with st.sidebar:
     with st.expander("운영 집계"):
         metrics = MetricsStore(settings.metrics_db_path).summary()
         if metrics:
-            st.dataframe([{"metric": key, "count": value} for key, value in metrics.items()], use_container_width=True, hide_index=True)
+            st.caption(
+                f"최근 {settings.metrics_retention_days}일 집계입니다. 요청·쿼리·IP 원문은 저장하지 않습니다."
+            )
+            st.dataframe(
+                [
+                    {"항목": metric_label(key), "카운터": key, "횟수": value}
+                    for key, value in metrics.items()
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
         else:
             st.caption("표시할 집계가 없습니다. 요청·쿼리 원문은 저장하지 않습니다.")
     if settings.enable_dev_evaluation:

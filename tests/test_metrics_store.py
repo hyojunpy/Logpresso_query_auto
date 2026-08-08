@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from app.services.metrics_store import MetricsStore
+from app.services.metrics_store import MetricsStore, metric_label
 
 
 def test_metrics_store_keeps_aggregate_counters_only(tmp_path):
@@ -18,3 +18,8 @@ def test_metrics_store_removes_counters_outside_retention_window(tmp_path):
     store.increment("current", occurred_at=now)
 
     assert store.summary() == {"current": 1}
+
+
+def test_metric_labels_are_human_readable_for_known_counters():
+    assert metric_label("generation_generated") == "쿼리 생성 완료"
+    assert metric_label("http_status_422") == "HTTP 422 응답"

@@ -18,6 +18,8 @@ def test_metrics_api_returns_aggregate_counters_without_raw_content():
     assert response.status_code == 200
     assert response.json()["contains_raw_content"] is False
     assert response.json()["metrics"]["http_status_200"] >= 1
+    assert response.json()["retention_days"] >= 1
+    assert response.json()["items"][0]["label"]
 
 
 def test_metrics_failure_does_not_break_a_request():
