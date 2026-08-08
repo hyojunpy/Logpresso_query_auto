@@ -15,6 +15,7 @@ from app.services.indexer import DocumentIndex
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.query_generator import QueryGenerator
 from app.services.intent_parser import IntentParser
+from app.services.llm.mock_provider import MockProvider
 from app.services.query_validator import QueryValidator
 from app.services.retriever import Retriever
 
@@ -127,6 +128,11 @@ with st.sidebar:
     st.write(f"문서 변경됨: {'예' if status['stale'] else '아니오'}")
     st.write(f"청크 수: {status['chunk_count']}")
     product = st.selectbox("제품군", ["ENT", "STD", "SNR", "FRS"], index=0)
+    generation_mode = st.selectbox(
+        "생성 모드",
+        ["자동", "빠른 규칙 기반", "Ollama 보조"],
+        help="빠른 규칙 기반은 로컬 모델 호출 없이 안전한 템플릿을 우선합니다.",
+    )
     version = st.text_input("버전")
     known_tables = st.text_area("테이블 힌트 (선택)", placeholder="예: firewall_logs")
     known_fields = st.text_area("필드 힌트 (선택)", placeholder="예: src_ip\naction\n_time")
@@ -379,7 +385,8 @@ def generate(text: str, *, clear_answer: bool = True) -> None:
         additions.append("조인 키는 " + interpretation_join_keys)
     enriched_text = text + ("\n추가 조건: " + " / ".join(additions) if additions else "")
     payload = GenerateQueryRequest(request=enriched_text, context=context)
-    generator = QueryGenerator(Retriever(index))
+    llm = MockProvider() if generation_mode == "빠른 규칙 기반" else None
+    generator = QueryGenerator(Retriever(index), llm=llm)
     response = generator.generate(payload)
     st.session_state["request_text"] = text
     st.session_state["response"] = response.model_dump()
