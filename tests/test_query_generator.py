@@ -339,6 +339,21 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertIn('| search action == "deny"', response.query)
         self.assertTrue(response.debug["llm_used"])
 
+    def test_falls_back_to_template_with_actionable_notice_when_llm_is_unavailable(self):
+        response = generator(
+            MockProvider(generation_response={"status": "error", "error_type": "connection_error"})
+        ).generate(
+            GenerateQueryRequest(
+                request="최근 24시간 firewall_logs에서 차단 로그 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["action", "_time"]),
+            )
+        )
+
+        self.assertEqual(response.status, "generated")
+        self.assertTrue(any("Ollama 서버" in item for item in response.assumptions))
+        self.assertEqual(response.debug["llm_error_type"], "connection_error")
+        self.assertFalse(response.debug["llm_used"])
+
     def test_llm_resolves_missing_intent_when_real_provider_is_enabled(self):
         instance = generator(
             MockProvider(

@@ -45,6 +45,13 @@ class LLMProviderTest(unittest.TestCase):
             data = OllamaProvider().generate_json("prompt", [])
         self.assertEqual(data["query"], "table logs")
 
+    def test_ollama_provider_retries_temporary_connection_failure_once(self):
+        payload = {"response": '{"status":"generated","query":"table logs"}'}
+        with patch("app.services.llm.ollama_provider.request.urlopen", side_effect=[URLError("offline"), FakeResponse(payload)]):
+            data = OllamaProvider().generate_json("prompt", [])
+        self.assertEqual(data["query"], "table logs")
+        self.assertEqual(data["retry_count"], 1)
+
     def test_openai_timeout_returns_safe_error_without_api_key(self):
         with patch("app.services.llm.openai_provider.settings.openai_api_key", "super-secret-key"):
             with patch("app.services.llm.openai_provider.request.urlopen", side_effect=TimeoutError):

@@ -67,6 +67,7 @@ class QueryGenerator:
         prompt = self._generation_prompt(payload, intent, results)
         llm_data = self.llm.generate_json(prompt, results)
         llm_query = self._query_from_llm(llm_data)
+        llm_notice = self._llm_fallback_notice(llm_data)
         query = llm_query or self._template_query(intent)
         validation = self._validate(query, payload)
         repair_attempts = 0
@@ -109,17 +110,30 @@ class QueryGenerator:
             execution_preview=preview,
             explanation=self._explain(query),
             references=references or references_from_results(results, "생성된 쿼리의 명령어와 옵션 근거입니다."),
-            assumptions=intent.assumptions,
+            assumptions=[*intent.assumptions, *([llm_notice] if llm_notice else [])],
             debug={
                 "provider": settings.llm_provider,
                 "retrieved": len(results),
                 "reference_mode": "commands" if references else "retrieval_fallback",
                 "llm_status": llm_data.get("status"),
+                "llm_error_type": llm_data.get("error_type"),
+                "llm_retry_count": llm_data.get("retry_count", 0),
                 "llm_used": bool(llm_query) and not used_template_fallback,
                 "template_fallback": used_template_fallback,
                 "repair_attempts": repair_attempts,
             },
         )
+
+    @staticmethod
+    def _llm_fallback_notice(data: dict) -> str | None:
+        error_type = data.get("error_type")
+        notices = {
+            "timeout": "LLM 응답 시간이 초과되어 규칙 기반 초안으로 생성했습니다. Ollama 상태와 모델 크기를 확인하세요.",
+            "connection_error": "LLM에 연결하지 못해 규칙 기반 초안으로 생성했습니다. Ollama 서버 실행 상태를 확인하세요.",
+            "invalid_response": "LLM 응답 형식을 해석하지 못해 규칙 기반 초안으로 생성했습니다.",
+            "http_error": "LLM 서비스 오류로 규칙 기반 초안으로 생성했습니다. Ollama 모델과 서버 로그를 확인하세요.",
+        }
+        return notices.get(error_type)
 
     @staticmethod
     def _with_business_aliases(payload: GenerateQueryRequest) -> GenerateQueryRequest:
