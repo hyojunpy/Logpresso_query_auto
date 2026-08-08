@@ -276,6 +276,16 @@ insa: ip, employee_id
 .\.venv\Scripts\python.exe -m compileall app tests ui -q
 ```
 
+배포 전 외부 시스템 호출 없이 설정을 확인하려면 다음을 실행합니다.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_deployment.py
+```
+
+기준 문서 누락, 손상된 카탈로그, 잘못된 LLM provider, OpenAI 키 누락은 오류로
+처리합니다. 문서 인덱스 미생성이나 Ollama 연결 여부는 경고로 표시하며, 이
+스크립트는 Logpresso·Ollama·OpenAI에 접속하지 않습니다.
+
 브라우저 회귀 테스트는 Playwright와 Chromium 설치가 필요합니다.
 
 ```powershell
