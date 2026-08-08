@@ -12,6 +12,7 @@ from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.retriever import Retriever
 from app.services.feedback_store import FeedbackStore
+from app.services.metrics_store import MetricsStore
 
 router = APIRouter()
 
@@ -66,6 +67,13 @@ VALIDATE_EXAMPLES = {
 def generate_query(payload: GenerateQueryRequest = Body(..., openapi_examples=GENERATE_EXAMPLES)):
     response = QueryGenerator(_retriever()).generate(payload)
     FeedbackStore(settings.db_path).record_generation_outcome(payload.request, response.status)
+    try:
+        MetricsStore(settings.metrics_db_path).increment(f"generation_{response.status}")
+        if response.debug.get("llm_error_type"):
+            MetricsStore(settings.metrics_db_path).increment("generation_llm_fallback")
+    except Exception:
+        # Metrics remain optional even when the local SQLite file is unavailable.
+        pass
     return response
 
 

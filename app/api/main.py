@@ -3,9 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from time import perf_counter
 from uuid import uuid4
 
-from app.api.routes import aliases, audit, catalog, documents, evaluations, feedback, generate, health, verification
+from app.api.routes import aliases, audit, catalog, documents, evaluations, feedback, generate, health, metrics, verification
 from app.core.config import settings
 from app.core.logging import configure_request_logging
+from app.services.metrics_store import MetricsStore
 
 
 logger = configure_request_logging(settings.log_level)
@@ -64,6 +65,11 @@ def create_app() -> FastAPI:
                 "duration_ms": duration_ms,
             },
         )
+        try:
+            MetricsStore(settings.metrics_db_path).increment(f"http_status_{response.status_code}")
+        except Exception:
+            # Operational counters are best-effort and must not affect user requests.
+            logger.exception("metrics_record_failed")
         return response
 
     app.include_router(health.router, prefix="/api/v1")
@@ -75,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(audit.router, prefix="/api/v1/internal/audit", tags=["internal"])
     app.include_router(evaluations.router, prefix="/api/v1/internal/evaluations", tags=["internal"])
     app.include_router(verification.router, prefix="/api/v1/internal/verification", tags=["internal"])
+    app.include_router(metrics.router, prefix="/api/v1/internal/metrics", tags=["internal"])
     return app
 
 

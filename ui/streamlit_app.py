@@ -26,6 +26,7 @@ from app.services.retriever import Retriever
 from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
 from app.services.ollama_status import check_ollama
+from app.services.metrics_store import MetricsStore
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -343,6 +344,12 @@ with st.sidebar:
             st.dataframe(events, use_container_width=True, hide_index=True)
         else:
             st.caption("표시할 관리 변경 이력이 없습니다.")
+    with st.expander("운영 집계"):
+        metrics = MetricsStore(settings.metrics_db_path).summary()
+        if metrics:
+            st.dataframe([{"metric": key, "count": value} for key, value in metrics.items()], use_container_width=True, hide_index=True)
+        else:
+            st.caption("표시할 집계가 없습니다. 요청·쿼리 원문은 저장하지 않습니다.")
     if settings.enable_dev_evaluation:
         with st.expander("개발용 Gold Set 평가"):
             st.caption("fixture 기반 평가이며 외부 Logpresso 시스템에 연결하지 않습니다.")
