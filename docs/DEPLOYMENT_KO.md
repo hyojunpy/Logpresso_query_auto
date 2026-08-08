@@ -48,6 +48,11 @@ table_name,field_name,field_type,description
 저장된 카탈로그는 `GET /api/v1/catalog/export/csv`로 UTF-8 BOM CSV 형태로
 내보낼 수 있습니다. Excel에서 한글 설명을 열어볼 때도 인코딩이 유지됩니다.
 
+카탈로그를 갱신할 때는 기존 JSON이 자동으로 `data/catalog-backups/`에
+보관됩니다. 관리자 API `GET /api/v1/catalog/backups`로 목록을 확인하고,
+`POST /api/v1/catalog/backups/{backup_name}/restore`로 이전 버전을 복원할 수
+있습니다.
+
 업로드 시 누락 헤더, 빈 테이블·필드, 중복 필드를 행 번호와 함께 확인합니다.
 카탈로그는 고객사 스키마 설명만 포함하고, 로그 원문이나 인증 정보는 넣지
 않습니다.
@@ -79,6 +84,15 @@ Docker Desktop을 사용하는 환경에서는 다음을 추가로 확인합니�
 docker compose config
 docker compose up --build
 ```
+
+운영 카탈로그와 분리된 검증이 필요하면 별도 폴더를 지정합니다.
+
+```powershell
+$env:LOGPRESSO_DATA_DIR = '.docker-test-data'
+docker compose up --build
+```
+
+이 경우 `data/`의 카탈로그·피드백·감사 데이터는 변경되지 않습니다.
 
 컨테이너는 API `8000`, UI `8501` 포트를 사용하며 두 서비스 모두 healthcheck를
 가집니다. Docker CLI가 설치되어 있지 않은 현재 PC에서는 Compose 기동 검증을

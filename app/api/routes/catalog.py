@@ -57,6 +57,25 @@ def export_catalog_csv(request: Request):
     )
 
 
+@router.get("/backups")
+def list_catalog_backups():
+    """TODO: restrict catalog history to catalog administrators."""
+    return {"items": CatalogService(settings.catalog_path).backups()}
+
+
+@router.post("/backups/{name}/restore", response_model=Catalog)
+def restore_catalog_backup(request: Request, name: str):
+    """TODO: protect catalog restoration with authentication/authorization."""
+    try:
+        saved = CatalogService(settings.catalog_path).restore(name)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="catalog backup not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="invalid catalog backup name") from error
+    AuditStore(settings.db_path).record("catalog.restore", "catalog", actor=audit_actor(request), metadata={"backup": name, "table_count": len(saved.tables)})
+    return saved
+
+
 @router.get("", response_model=Catalog)
 def get_catalog():
     """TODO: require authentication before exposing operational catalog metadata."""

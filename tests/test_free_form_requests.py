@@ -87,3 +87,12 @@ def test_free_form_requests_keep_operational_intent(monkeypatch, request_text, e
     assert response.query is not None
     for expected in expected_parts:
         assert expected in response.query
+
+
+def test_explicit_table_identifier_wins_over_firewall_alias(monkeypatch):
+    monkeypatch.setattr("app.services.query_generator.settings.llm_provider", "mock")
+    request = "\ucd5c\uadfc 24\uc2dc\uac04 firewall_logs\uc5d0\uc11c \ucd9c\ubc1c\uc9c0 IP\ubcc4 \ucc28\ub2e8 \uac74\uc218\ub97c 20\uac1c \ubcf4\uc5ec\uc918"
+    response = QueryGenerator(Retriever(shared_index())).generate(GenerateQueryRequest(request=request))
+    assert response.status == "generated"
+    assert response.intent.tables[0] == "firewall_logs"
+    assert response.query and response.query.startswith("table duration=24h firewall_logs")

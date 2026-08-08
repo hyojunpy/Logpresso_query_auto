@@ -50,7 +50,10 @@ jobs:
       - name: Start compose services in mock mode
         env:
           LLM_PROVIDER: mock
-        run: docker compose up --build --detach
+          LOGPRESSO_DATA_DIR: ./.ci-data
+        run: |
+          mkdir -p .ci-data
+          docker compose up --build --detach
 
       - name: Verify API and UI health checks
         run: |
@@ -63,6 +66,8 @@ jobs:
 
       - name: Stop compose services
         if: always()
+        env:
+          LOGPRESSO_DATA_DIR: ./.ci-data
         run: docker compose down --volumes
 
   browser-test:

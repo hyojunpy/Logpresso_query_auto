@@ -14,7 +14,8 @@ Complete every item before creating a `v*` tag.
 - [ ] Update `project.version` in `pyproject.toml` to match the intended tag.
 - [ ] Run `python -m pytest`.
 - [ ] Run `docker compose config --quiet`.
-- [ ] Run `docker compose build` and confirm both service health checks.
+- [ ] In PowerShell, set `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks.
+- [ ] Stop the release-check stack with the same `LOGPRESSO_DATA_DIR` value and remove only `.docker-release-check`.
 - [ ] Confirm the `main` branch CI and CodeQL workflows pass.
 
 ## Publish

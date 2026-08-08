@@ -18,8 +18,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501}
     volumes:
-      - ./docs:/app/docs
-      - ./data:/app/data
+      - ${LOGPRESSO_DOCS_DIR:-./docs}:/app/docs:ro
+      - ${LOGPRESSO_DATA_DIR:-./data}:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
       interval: 30s
@@ -45,8 +45,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501}
     volumes:
-      - ./docs:/app/docs
-      - ./data:/app/data
+      - ${LOGPRESSO_DOCS_DIR:-./docs}:/app/docs:ro
+      - ${LOGPRESSO_DATA_DIR:-./data}:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
       interval: 30s

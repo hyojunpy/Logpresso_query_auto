@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -26,8 +27,33 @@ class CatalogService:
 
     def save(self, catalog: Catalog) -> Catalog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists():
+            backup = self.backup_dir / f"catalog-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}.json"
+            self.backup_dir.mkdir(parents=True, exist_ok=True)
+            backup.write_text(self.path.read_text(encoding="utf-8"), encoding="utf-8")
         self.path.write_text(catalog.model_dump_json(indent=2), encoding="utf-8")
         return catalog
+
+    @property
+    def backup_dir(self) -> Path:
+        return self.path.parent / "catalog-backups"
+
+    def backups(self) -> list[dict[str, str]]:
+        if not self.backup_dir.exists():
+            return []
+        return [
+            {"name": item.name, "created_at": datetime.fromtimestamp(item.stat().st_mtime, UTC).isoformat()}
+            for item in sorted(self.backup_dir.glob("catalog-*.json"), reverse=True)
+        ]
+
+    def restore(self, name: str) -> Catalog:
+        if Path(name).name != name or not re.fullmatch(r"catalog-\d{8}T\d{12}Z\.json", name):
+            raise ValueError("invalid catalog backup name")
+        backup = self.backup_dir / name
+        if not backup.exists():
+            raise FileNotFoundError(name)
+        catalog = Catalog.model_validate_json(backup.read_text(encoding="utf-8"))
+        return self.save(catalog)
 
     def resolve(self, context: RequestContext) -> Catalog | None:
         base_catalog = context.catalog or self.load()

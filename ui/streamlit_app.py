@@ -221,7 +221,7 @@ with st.sidebar:
         with st.expander("카탈로그 미리보기"):
             st.json(active_catalog.model_dump())
     else:
-        st.caption("카탈로그 없음: 알려진 테이블/필드와 문서 기반 검증을 사용합니다.")
+        st.info("카탈로그 없이 바로 시작할 수 있습니다. 요청에 실제 테이블·필드명을 직접 쓰면 그 이름을 우선 사용하고, 생성 전 해석 편집 또는 수정 쿼리 재검증으로 이번 세션의 힌트를 보완할 수 있습니다.")
     with st.expander("카탈로그 편집"):
         edited_rows = st.data_editor(
             catalog_rows(active_catalog),

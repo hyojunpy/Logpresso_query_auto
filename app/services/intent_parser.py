@@ -441,6 +441,10 @@ class IntentParser:
 
     def _tables(self, text: str, known_tables: list[str], allow_single_default: bool = True) -> list[str]:
         tables = [table for table in known_tables if table in text]
+        # A concrete log/table identifier is stronger evidence than a business alias.
+        for table in re.findall(r"\b([A-Za-z][A-Za-z0-9_]*(?:_logs?|_table))\b", text, flags=re.IGNORECASE):
+            if table not in tables:
+                tables.append(table)
         declared_tables = re.findall(r"(?:테이블은|tables?\s*(?:are|=|:))\s*([A-Za-z_][A-Za-z0-9_]*)", text, flags=re.IGNORECASE)
         for table in declared_tables:
             if table not in tables:
