@@ -83,3 +83,34 @@ class GenerateQueryResponse(BaseModel):
     references: list[QueryReference] = []
     assumptions: list[str] = []
     debug: dict[str, object] = {}
+
+
+class FeedbackSaveResponse(BaseModel):
+    id: int
+    created_at: str
+    raw_text_stored: bool
+
+
+class FeedbackSummaryResponse(BaseModel):
+    total: int
+    ratings: dict[str, int]
+    issue_types: dict[str, int]
+
+
+class ImprovementCandidate(BaseModel):
+    issue_type: str
+    count: int
+    title: str
+    suggestion: str
+
+
+class ImprovementCandidatesResponse(BaseModel):
+    items: list[ImprovementCandidate]
+
+
+class ImprovementReportResponse(BaseModel):
+    total_feedback: int
+    ratings: dict[str, int]
+    issue_types: dict[str, int]
+    candidates: list[ImprovementCandidate]
+    priority_issue_types: list[str]

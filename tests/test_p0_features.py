@@ -42,7 +42,7 @@ def test_request_catalog_extends_validation_without_persisting_schema():
 
 
 def test_catalog_service_persists_manually_edited_fields():
-    with TemporaryDirectory() as tmp:
+    with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         service = CatalogService(Path(tmp) / "catalog.json")
         catalog = Catalog.model_validate(
             {
@@ -179,16 +179,79 @@ def test_feedback_api_masks_secrets_and_catalog_api_roundtrip():
     from app.api.main import app
     from app.core.config import settings
     from fastapi.testclient import TestClient
-    original = settings.catalog_path
-    with TemporaryDirectory() as tmp:
+    original_catalog_path = settings.catalog_path
+    original_db_path = settings.db_path
+    with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         settings.catalog_path = Path(tmp) / "catalog.json"
+        settings.db_path = Path(tmp) / "app.db"
         client = TestClient(app)
         response = client.put("/api/v1/catalog", json={"catalog": {"source": "fixture", "tables": [{"table_name": "logs", "fields": []}]}})
         assert response.status_code == 200
         assert client.get("/api/v1/catalog").json()["tables"][0]["table_name"] == "logs"
         saved = client.post("/api/v1/feedback", json={"request_text": "token=secret", "result_status": "generated", "rating": "negative", "feedback_comment": "password=secret"})
         assert saved.status_code == 200 and saved.json()["raw_text_stored"] is False
-    settings.catalog_path = original
+    settings.catalog_path = original_catalog_path
+    settings.db_path = original_db_path
+
+
+def test_catalog_csv_import_api_validates_and_persists_fixture():
+    from app.api.main import app
+    from app.core.config import settings
+    from fastapi.testclient import TestClient
+
+    original_catalog_path = settings.catalog_path
+    original_db_path = settings.db_path
+    try:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            settings.catalog_path = Path(tmp) / "catalog.json"
+            settings.db_path = Path(tmp) / "app.db"
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/catalog/import/csv",
+                content="table_name,field_name,field_type,description\nfirewall,src_ip,ip,source\n",
+                headers={"content-type": "text/csv", "X-Actor-ID": "catalog-admin"},
+            )
+            assert response.status_code == 200
+            assert response.json()["tables"][0]["fields"][0]["field_name"] == "src_ip"
+            invalid = client.post(
+                "/api/v1/catalog/import/csv",
+                content="table_name,field_name\nfirewall,src_ip\n",
+                headers={"content-type": "text/csv"},
+            )
+            assert invalid.status_code == 422
+            assert invalid.json()["detail"]["code"] == "invalid_catalog_csv"
+            audit = client.get("/api/v1/internal/audit").json()["items"]
+            assert audit[0]["action"] == "catalog.import_csv"
+            assert audit[0]["actor"] == "catalog-admin"
+    finally:
+        settings.catalog_path = original_catalog_path
+        settings.db_path = original_db_path
+
+
+def test_catalog_csv_export_api_returns_utf8_csv():
+    from app.api.main import app
+    from app.core.config import settings
+    from fastapi.testclient import TestClient
+
+    original_catalog_path = settings.catalog_path
+    original_db_path = settings.db_path
+    try:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            settings.catalog_path = Path(tmp) / "catalog.json"
+            settings.db_path = Path(tmp) / "app.db"
+            client = TestClient(app)
+            client.put("/api/v1/catalog", json={"catalog": {"source": "fixture", "tables": [{
+                "table_name": "firewall", "node": "node-a", "namespace": "security", "description": "Firewall events", "fields": [{"field_name": "src_ip", "field_type": "ip", "nullable": False}],
+            }]}})
+            response = client.get("/api/v1/catalog/export/csv")
+    finally:
+        settings.catalog_path = original_catalog_path
+        settings.db_path = original_db_path
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.text.startswith("\ufefftable_name,node,namespace,table_description,field_name,field_type,nullable,description")
+    assert "firewall,node-a,security,Firewall events,src_ip,ip,false," in response.text
 
 
 def test_gold_set_api_is_disabled_by_default():
@@ -209,6 +272,32 @@ def test_feedback_summary_does_not_return_raw_text():
     body = TestClient(app).get("/api/v1/feedback/summary").json()
     assert {"total", "ratings", "issue_types"}.issubset(body)
     assert "request_text" not in body and "generated_query" not in body
+
+
+def test_feedback_improvement_report_returns_only_aggregated_metadata():
+    from app.api.main import app
+    from app.core.config import settings
+    from fastapi.testclient import TestClient
+
+    original = settings.db_path
+    try:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            settings.db_path = Path(tmp) / "feedback.db"
+            client = TestClient(app)
+            saved = client.post("/api/v1/feedback", json={
+                "request_text": "token=secret", "generated_query": "table confidential_logs",
+                "result_status": "generated", "rating": "negative", "issue_type": "wrong_field",
+            })
+            assert saved.status_code == 200
+            body = client.get("/api/v1/feedback/improvement-report").json()
+    finally:
+        settings.db_path = original
+
+    assert body["total_feedback"] == 1
+    assert body["issue_types"] == {"wrong_field": 1}
+    assert body["priority_issue_types"] == ["wrong_field"]
+    assert "token=secret" not in str(body)
+    assert "confidential_logs" not in str(body)
 
 
 def test_query_analysis_api_returns_quality_and_preview():

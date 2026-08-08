@@ -1,7 +1,6 @@
 import json
 import hashlib
 import re
-import csv
 from datetime import datetime, timezone
 
 import streamlit as st
@@ -9,8 +8,11 @@ import streamlit as st
 from app.core.config import settings
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
 from app.services.catalog_service import CatalogService
+from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.feedback_store import FeedbackStore
 from app.services.alias_store import AliasStore
+from app.services.generation_comparison import append_comparison_history, comparison_history_rows, compare_generation_results
+from app.services.session_hints import merge_hints, remove_hint
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.indexer import DocumentIndex
 from app.services.quality_analyzer import QueryQualityAnalyzer
@@ -33,11 +35,10 @@ def load_uploaded_catalog(uploaded_file) -> Catalog | None:
         return None
     try:
         if uploaded_file.name.lower().endswith(".csv"):
-            rows = list(csv.DictReader(uploaded_file.getvalue().decode("utf-8-sig").splitlines()))
-            return catalog_from_rows(rows, None)
+            return catalog_from_csv_bytes(uploaded_file.getvalue())
         return Catalog.model_validate_json(uploaded_file.getvalue())
-    except ValueError:
-        st.sidebar.error("카탈로그 JSON 형식이 올바르지 않습니다.")
+    except (ValueError, CatalogImportError) as error:
+        st.sidebar.error(f"카탈로그 파일 오류: {error}")
         return None
 
 
@@ -128,6 +129,12 @@ with st.sidebar:
                 for candidate in candidates:
                     st.write(f"- {candidate['title']} ({candidate['count']}건)")
                     st.caption(candidate["suggestion"])
+        st.download_button(
+            "개선 리포트 다운로드",
+            data=json.dumps(FeedbackStore(settings.db_path).improvement_report(), ensure_ascii=False, indent=2),
+            file_name="query-improvement-report.json",
+            mime="application/json",
+        )
     st.write(f"문서 인덱스: {'완료' if status['indexed'] else '미생성'}")
     st.write(f"문서 변경됨: {'예' if status['stale'] else '아니오'}")
     st.write(f"청크 수: {status['chunk_count']}")
@@ -165,6 +172,32 @@ with st.sidebar:
                 kind, phrase = alias_to_delete.split(": ", 1)
                 alias_store.delete(phrase, kind)
                 st.rerun()
+    with st.expander("이번 세션에서 기억한 힌트"):
+        learned_tables = st.session_state.get("learned_tables", [])
+        learned_fields = st.session_state.get("learned_fields", [])
+        if learned_tables or learned_fields:
+            st.write("테이블: " + ", ".join(learned_tables or ["없음"]))
+            st.write("필드: " + ", ".join(learned_fields or ["없음"]))
+            hint_kind = st.selectbox("\uc120\ud0dd\ud560 \uae30\uc5b5 \ud78c\ud2b8 \uc885\ub958", ["table", "field"], key="session_hint_kind")
+            hint_options = learned_tables if hint_kind == "table" else learned_fields
+            hint_to_remove = st.selectbox("\uc120\ud0dd\ud560 \uae30\uc5b5 \ud78c\ud2b8", [""] + hint_options, key="session_hint_to_remove")
+            if st.button("\uc120\ud0dd \ud78c\ud2b8 \uc0ad\uc81c") and hint_to_remove:
+                state_key = "learned_tables" if hint_kind == "table" else "learned_fields"
+                st.session_state[state_key] = remove_hint(st.session_state.get(state_key, []), hint_to_remove)
+                st.rerun()
+            clear_tables, clear_fields, clear_all = st.columns(3)
+            if clear_tables.button("테이블 초기화"):
+                st.session_state.pop("learned_tables", None)
+                st.rerun()
+            if clear_fields.button("필드 초기화"):
+                st.session_state.pop("learned_fields", None)
+                st.rerun()
+            if clear_all.button("모두 초기화"):
+                st.session_state.pop("learned_tables", None)
+                st.session_state.pop("learned_fields", None)
+                st.rerun()
+        else:
+            st.caption("수정 쿼리 재검증을 통과한 후 힌트를 기억하면 여기에 표시됩니다.")
     st.caption("비워 두어도 요청에 명시한 테이블과 필드를 생성에 사용합니다. 실제 존재 여부는 카탈로그가 있을 때 검증합니다.")
     request_schema = st.text_area("이번 요청 스키마 (선택)", placeholder="firewall_logs: src_ip, action, _time\napp_logs: message, host")
     try:
@@ -173,10 +206,10 @@ with st.sidebar:
         request_schema_catalog = None
         st.error(str(error))
     uploaded_catalog = st.file_uploader("카탈로그 파일", type=["json", "csv"])
-    st.caption("CSV 형식: table_name, field_name, field_type, description")
+    st.caption("CSV 필수 열: table_name, field_name, field_type, description | 선택 열: node, namespace, table_description, nullable")
     st.download_button(
         "CSV 카탈로그 템플릿 다운로드",
-        data="table_name,field_name,field_type,description\nfirewall_logs,src_ip,ip,source address\nfirewall_logs,action,string,allow or deny\n",
+        data="table_name,node,namespace,table_description,field_name,field_type,nullable,description\nfirewall_logs,node-a,security,Firewall events,src_ip,ip,false,source address\nfirewall_logs,node-a,security,Firewall events,action,string,true,allow or deny\n",
         file_name="logpresso-catalog-template.csv",
         mime="text/csv",
     )
@@ -342,6 +375,25 @@ def render_revalidation_summary(analysis: dict) -> None:
         st.json(analysis)
 
 
+def render_validation_result(title: str, result: dict) -> None:
+    """Make generation-time validation scannable while preserving raw evidence."""
+    errors = result.get("errors", [])
+    warnings = result.get("warnings", [])
+    is_valid = result.get("valid", False)
+    st.subheader(title)
+    (st.success if is_valid else st.error)("통과" if is_valid else f"오류 {len(errors)}건")
+    error_column, warning_column, command_column = st.columns(3)
+    error_column.metric("오류", len(errors))
+    warning_column.metric("경고", len(warnings))
+    command_column.metric("명령", len(result.get("commands", [])))
+    for issue in errors:
+        st.error(issue.get("message", "검증 오류") + (f" 제안: {issue['suggestion']}" if issue.get("suggestion") else ""))
+    for issue in warnings:
+        st.warning(issue.get("message", "검증 경고") + (f" 제안: {issue['suggestion']}" if issue.get("suggestion") else ""))
+    with st.expander(f"{title} 상세 JSON"):
+        st.json(result)
+
+
 def query_structure_dot(intent: dict) -> str:
     """Render the parsed plan only; this never executes a query."""
     tables = intent.get("tables") or []
@@ -467,6 +519,30 @@ if response:
                 st.write(f"- {question}")
         elif response.get("query"):
             st.code(response["query"], language="sql")
+            with st.expander("규칙 기반과 Ollama 결과 비교"):
+                st.caption("비교는 쿼리 초안과 검증 정보만 보여 주며, 실제 Logpresso 실행은 하지 않습니다.")
+                if settings.llm_provider != "ollama":
+                    st.info("Ollama 비교는 LLM_PROVIDER=ollama일 때 사용할 수 있습니다.")
+                elif st.button("두 모드 비교 생성"):
+                    comparison_payload = GenerateQueryRequest(request=request_text, context=current_context())
+                    with st.spinner("두 개의 쿼리 초안을 검토 중..."):
+                        rule_response = QueryGenerator(Retriever(index), llm=MockProvider()).generate(comparison_payload)
+                        original_timeout = settings.ollama_timeout_seconds
+                        settings.ollama_timeout_seconds = min(original_timeout, 30)
+                        try:
+                            ollama_response = QueryGenerator(Retriever(index)).generate(comparison_payload)
+                        finally:
+                            settings.ollama_timeout_seconds = original_timeout
+                    comparison = compare_generation_results(rule_response, ollama_response)
+                    st.session_state["generation_comparison"] = comparison
+                    st.session_state["generation_comparison_history"] = append_comparison_history(
+                        st.session_state.get("generation_comparison_history", []), comparison
+                    )
+                if comparison := st.session_state.get("generation_comparison"):
+                    st.json(comparison)
+                if history := st.session_state.get("generation_comparison_history"):
+                    st.caption("이번 브라우저 세션의 비교 이력")
+                    st.dataframe(comparison_history_rows(history), use_container_width=True, hide_index=True)
             edited_query = st.text_area("생성 쿼리 편집", height=180, key="editable_query")
             edited_fingerprint = request_fingerprint(edited_query, current_context())
             if (
@@ -483,21 +559,20 @@ if response:
                 if edited_analysis.get("validation", {}).get("valid") and st.button("이 수정 기준을 이번 세션에 기억"):
                     tables = CatalogService._tables(edited_query)
                     fields = sorted(CatalogService._field_refs(edited_query))
-                    st.session_state["learned_tables"] = list(dict.fromkeys([*st.session_state.get("learned_tables", []), *tables]))
-                    st.session_state["learned_fields"] = list(dict.fromkeys([*st.session_state.get("learned_fields", []), *fields]))
+                    st.session_state["learned_tables"] = merge_hints(st.session_state.get("learned_tables", []), tables)
+                    st.session_state["learned_fields"] = merge_hints(st.session_state.get("learned_fields", []), fields)
                     st.success("다음 요청부터 이번 세션의 테이블·필드 힌트로 사용합니다.")
         else:
             st.error("쿼리를 생성하지 못했습니다.")
     with tabs[1]:
         st.json(response.get("explanation", []))
     with tabs[2]:
-        st.json(response.get("validation", {}))
+        render_validation_result("문법 검증 결과", response.get("validation") or {})
         schema = response.get("schema_validation") or {}
         quality = response.get("quality") or {}
         preview = response.get("execution_preview") or {}
-        st.subheader("스키마 검증 결과")
         if schema:
-            st.json(schema)
+            render_validation_result("스키마 검증 결과", schema)
         else:
             st.info("카탈로그가 제공되지 않아 문법 중심으로만 검증했습니다. 실제 테이블/필드 카탈로그를 추가하면 검증 범위가 넓어집니다.")
         st.subheader("쿼리 품질 진단")

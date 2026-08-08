@@ -33,6 +33,11 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_openapi_exposes_catalog_and_feedback_report_contracts(self):
+        schemas = self.client.get("/openapi.json").json()["components"]["schemas"]
+        self.assertIn("Catalog", schemas)
+        self.assertIn("ImprovementReportResponse", schemas)
+
     def test_api_responses_include_security_headers(self):
         response = self.client.get("/api/v1/health")
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")

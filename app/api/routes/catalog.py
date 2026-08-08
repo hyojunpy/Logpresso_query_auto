@@ -1,20 +1,72 @@
-from fastapi import APIRouter, Body
+import csv
+import io
+
+from fastapi import APIRouter, Body, Request
+from fastapi.responses import Response
 
 from app.core.config import settings
 from app.models.request import CatalogUpsertRequest
+from app.models.request import Catalog
+from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
+from app.services.audit_store import AuditStore
+from app.core.management_access import audit_actor
+from fastapi import HTTPException
 from app.services.catalog_service import CatalogService
 
 router = APIRouter()
 
 
-@router.get("")
+@router.post("/import/csv", response_model=Catalog)
+def import_catalog_csv(request: Request, content: str = Body(..., media_type="text/csv")):
+    """TODO: protect catalog administration with authentication/authorization."""
+    try:
+        catalog = catalog_from_csv_bytes(content.encode("utf-8"))
+    except CatalogImportError as error:
+        raise HTTPException(status_code=422, detail={"code": "invalid_catalog_csv", "message": str(error)}) from error
+    saved = CatalogService(settings.catalog_path).save(catalog)
+    AuditStore(settings.db_path).record("catalog.import_csv", "catalog", actor=audit_actor(request), metadata={"table_count": len(saved.tables)})
+    return saved
+
+
+@router.get("/export/csv", response_class=Response)
+def export_catalog_csv(request: Request):
+    """TODO: require authentication before exporting operational catalog metadata."""
+    catalog = CatalogService(settings.catalog_path).load()
+    AuditStore(settings.db_path).record("catalog.export_csv", "catalog", actor=audit_actor(request), metadata={"table_count": len(catalog.tables) if catalog else 0})
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=["table_name", "node", "namespace", "table_description", "field_name", "field_type", "nullable", "description"])
+    writer.writeheader()
+    for table in (catalog.tables if catalog else []):
+        if not table.fields:
+            writer.writerow({"table_name": table.table_name, "node": table.node or "", "namespace": table.namespace or "", "table_description": table.description or "", "field_name": "", "field_type": "unknown", "nullable": "", "description": ""})
+        for field in table.fields:
+            writer.writerow({
+                "table_name": table.table_name,
+                "node": table.node or "",
+                "namespace": table.namespace or "",
+                "table_description": table.description or "",
+                "field_name": field.field_name,
+                "field_type": field.field_type,
+                "nullable": "true" if field.nullable is True else "false" if field.nullable is False else "",
+                "description": field.description or "",
+            })
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="logpresso-catalog.csv"'},
+    )
+
+
+@router.get("", response_model=Catalog)
 def get_catalog():
     """TODO: require authentication before exposing operational catalog metadata."""
     catalog = CatalogService(settings.catalog_path).load()
     return catalog or {"tables": [], "source": "unknown"}
 
 
-@router.put("")
-def put_catalog(payload: CatalogUpsertRequest = Body(...)):
+@router.put("", response_model=Catalog)
+def put_catalog(request: Request, payload: CatalogUpsertRequest = Body(...)):
     """TODO: protect catalog administration with authentication/authorization."""
-    return CatalogService(settings.catalog_path).save(payload.catalog)
+    saved = CatalogService(settings.catalog_path).save(payload.catalog)
+    AuditStore(settings.db_path).record("catalog.upsert", "catalog", actor=audit_actor(request), metadata={"table_count": len(saved.tables), "source": saved.source})
+    return saved

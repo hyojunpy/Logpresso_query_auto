@@ -24,6 +24,15 @@ separate password store to this project. Apply role checks at the API boundary,
 keep audit metadata, and restrict catalog exports when they contain sensitive
 schema descriptions.
 
+## Authentication And Audit Integration
+
+The application does not authenticate users itself. A reverse proxy or customer
+identity provider should enforce the roles above and may forward a non-sensitive
+`X-Actor-ID` header. Management actions record only action type, resource,
+actor identifier, small metadata such as table count, and timestamp in the
+local `management_audit` SQLite table. Request text, generated queries, and log
+content are intentionally excluded from this audit trail.
+
 ## File-Based Catalog Exchange
 
 When direct access to a customer Logpresso server is unavailable, accept a

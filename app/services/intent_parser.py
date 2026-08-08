@@ -622,6 +622,23 @@ class IntentParser:
             add_filter("status", "failure")
             count_by("host")
             inferred.extend(["auth_logs", "status=failure", "host"])
+        if "\ud5c8\uc6a9" in text and any("firewall" in table.lower() for table in intent.tables):
+            add_filter("action", "allow")
+            inferred.append("action=allow")
+        if any(phrase in text for phrase in ("\ub3c4\ucc29\uc9c0 IP\ubcc4", "\ubaa9\uc801\uc9c0 IP\ubcc4")):
+            add_table("firewall_logs")
+            count_by("dst_ip")
+            inferred.extend(["firewall_logs", "dst_ip"])
+        if any(phrase in text for phrase in ("\uc804\uccb4 \uac74\uc218", "\ucd1d \uac74\uc218", "\uba87 \uac74")) and intent.tables and not intent.aggregations:
+            intent.aggregations.append(Aggregation(function="count"))
+            inferred.append("count")
+        if ("\uc6f9\uc11c\ubc84" in text and "\uc624\ub958" in text) and not any(item.field == "severity" for item in intent.filters):
+            add_table("web_logs")
+            add_filter("severity", "error")
+            count_by("_time")
+            inferred.extend(["web_logs", "severity=error"])
+        if "\ud5c8\uc6a9" in text and any("firewall" in table.lower() for table in intent.tables) and not intent.selected_fields:
+            intent.selected_fields.extend(["src_ip", "dst_ip", "action"])
         if inferred:
             intent.assumptions.append("Free-form defaults inferred: " + ", ".join(dict.fromkeys(inferred)) + ". Confirm against the catalog.")
         if "계정별" in text and not intent.group_by:

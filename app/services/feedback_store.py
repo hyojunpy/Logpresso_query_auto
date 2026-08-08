@@ -55,6 +55,18 @@ class FeedbackStore:
             if issue in suggestions
         ]
 
+    def improvement_report(self) -> dict[str, object]:
+        """Aggregate only masked feedback metadata for an operational improvement view."""
+        summary = self.summary()
+        candidates = self.improvement_candidates()
+        return {
+            "total_feedback": summary["total"],
+            "ratings": summary["ratings"],
+            "issue_types": summary["issue_types"],
+            "candidates": candidates,
+            "priority_issue_types": [item["issue_type"] for item in candidates],
+        }
+
     @staticmethod
     def _hash(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -64,4 +76,7 @@ class FeedbackStore:
         if not value:
             return None
         masked = re.sub(r"(?i)(api[_-]?key|token|password)\s*[:=]\s*\S+", r"\1=[REDACTED]", value)
+        masked = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~-]+", "Bearer [REDACTED]", masked)
+        masked = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[EMAIL]", masked)
+        masked = re.sub(r"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b", "[IP]", masked)
         return masked[:1000]

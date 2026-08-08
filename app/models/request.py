@@ -127,12 +127,12 @@ class RequestContext(BaseModel):
 
 
 class GenerateQueryRequest(BaseModel):
-    request: str = Field(min_length=1)
+    request: str = Field(min_length=1, max_length=4000)
     context: RequestContext = RequestContext()
 
 
 class ValidateQueryRequest(BaseModel):
-    query: str = Field(min_length=1, examples=["table duration=24h firewall_logs\n| stats count by src_ip"])
+    query: str = Field(min_length=1, max_length=20000, examples=["table duration=24h firewall_logs\n| stats count by src_ip"])
     catalog: Catalog | None = None
     context: RequestContext = RequestContext()
 
