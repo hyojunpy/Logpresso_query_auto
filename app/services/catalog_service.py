@@ -173,16 +173,26 @@ class CatalogService:
     @staticmethod
     def _field_lineage(query: str, tables: list[CatalogTable]) -> list[FieldLineage]:
         """Surface simple provenance; this is informational, never a query rewrite."""
-        source_table = tables[0].table_name if tables else None
         lineage: list[FieldLineage] = []
+        origins: dict[str, set[str]] = {}
         for table in tables:
             for field in table.fields:
+                origins.setdefault(field.field_name, set()).add(table.table_name)
                 lineage.append(FieldLineage(output_field=field.field_name, input_fields=[field.field_name], operation="source", source_table=table.table_name))
+        aliases: dict[str, set[str]] = {}
+
+        def source_table(field: str) -> str | None:
+            candidates = aliases.get(field, origins.get(field, set()))
+            return next(iter(candidates)) if len(candidates) == 1 else None
+
         for source, target in re.findall(r"\brename\s+([A-Za-z_][\w]*)\s+as\s+([A-Za-z_][\w]*)", query, flags=re.IGNORECASE):
-            lineage.append(FieldLineage(output_field=target, input_fields=[source], operation="rename", source_table=source_table))
+            aliases[target] = aliases.get(source, origins.get(source, set()))
+            lineage.append(FieldLineage(output_field=target, input_fields=[source], operation="rename", source_table=source_table(source)))
         for target, expression in re.findall(r"\beval\s+([A-Za-z_][\w]*)\s*=\s*([^\n|]+)", query, flags=re.IGNORECASE):
             inputs = re.findall(r"\b[A-Za-z_][\w]*\b", expression)
-            lineage.append(FieldLineage(output_field=target, input_fields=inputs, operation="eval", source_table=source_table))
+            input_sources = set().union(*(aliases.get(field, origins.get(field, set())) for field in inputs)) if inputs else set()
+            aliases[target] = input_sources
+            lineage.append(FieldLineage(output_field=target, input_fields=inputs, operation="eval", source_table=next(iter(input_sources)) if len(input_sources) == 1 else None))
         return lineage
 
     @staticmethod

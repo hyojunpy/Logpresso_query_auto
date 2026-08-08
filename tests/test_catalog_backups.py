@@ -45,3 +45,21 @@ def test_schema_validation_exposes_rename_and_eval_field_lineage(tmp_path):
     assert ("src_ip", "source") in lineage
     assert ("allocated_ip", "rename") in lineage
     assert ("join_key", "eval") in lineage
+
+
+def test_field_lineage_identifies_right_join_field_without_guessing_ambiguous_fields(tmp_path):
+    service = CatalogService(tmp_path / "catalog.json")
+    service.save(Catalog(source="manual", tables=[
+        CatalogTable(table_name="firewall", fields=[CatalogField(field_name="src_ip"), CatalogField(field_name="ip")]),
+        CatalogTable(table_name="insa", fields=[CatalogField(field_name="employee_ip"), CatalogField(field_name="ip")]),
+    ]))
+
+    result = service.validate_query(
+        "table firewall\n| rename src_ip as source_ip\n| join type=left _join_key [\n table insa\n | rename employee_ip as employee_address\n]\n| eval common_ip = ip",
+        RequestContext(),
+    )
+
+    lineage = {item.output_field: item for item in result.field_lineage}
+    assert lineage["source_ip"].source_table == "firewall"
+    assert lineage["employee_address"].source_table == "insa"
+    assert lineage["common_ip"].source_table is None
