@@ -13,6 +13,7 @@ from app.services.feedback_store import FeedbackStore
 from app.services.alias_store import AliasImportError, AliasStore
 from app.services.audit_store import AuditStore
 from app.services.generation_comparison import append_comparison_history, comparison_history_rows, compare_generation_results
+from app.services.gold_set import run_gold_set
 from app.services.session_hints import merge_hints, remove_hint
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.indexer import DocumentIndex
@@ -322,6 +323,18 @@ with st.sidebar:
             st.dataframe(events, use_container_width=True, hide_index=True)
         else:
             st.caption("표시할 관리 변경 이력이 없습니다.")
+    if settings.enable_dev_evaluation:
+        with st.expander("개발용 Gold Set 평가"):
+            st.caption("fixture 기반 평가이며 외부 Logpresso 시스템에 연결하지 않습니다.")
+            if st.button("Gold Set 실행"):
+                st.session_state["gold_set_result"] = run_gold_set(settings.db_path, settings.docs_dir.parent / "tests" / "fixtures" / "gold_set.json")
+            if result := st.session_state.get("gold_set_result"):
+                st.metric("통과", f"{result['passed']} / {result['total']}")
+                failures = [item for item in result["results"] if not item["passed"]]
+                if failures:
+                    st.dataframe(failures, use_container_width=True, hide_index=True)
+                else:
+                    st.success("모든 Gold Set 시나리오를 통과했습니다.")
 
 st.title("로그프레소 자연어 쿼리 생성기")
 
