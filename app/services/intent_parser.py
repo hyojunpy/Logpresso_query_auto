@@ -152,6 +152,8 @@ class IntentParser:
             hints.append("action")
         if any(word.lower() in lowered for word in ERROR_WORDS) and any("app" in table.lower() for table in tables):
             hints.append("severity")
+        if any(word.lower() in lowered for word in ERROR_WORDS) and "message" in lowered:
+            hints.append("message")
         if any(phrase in text for phrase in ("외부로 나간", "나간 통신", "출발지 주소", "출발지 IP")):
             hints.append("src_ip")
         if any(phrase in text for phrase in ("직원 IP", "인사 IP")):
@@ -231,7 +233,7 @@ class IntentParser:
             return None
         left_table = realtime_source or tables[0]
         right_table = tables[0] if realtime_source else tables[1]
-        if not realtime_source and "방화벽 로그" in text:
+        if not realtime_source and ("방화벽 로그" in text or ("firewall" in lowered and "log" in lowered)):
             firewall_table = next((table for table in tables if "firewall" in table.lower()), None)
             if firewall_table:
                 left_table = firewall_table
@@ -439,6 +441,10 @@ class IntentParser:
 
     def _tables(self, text: str, known_tables: list[str], allow_single_default: bool = True) -> list[str]:
         tables = [table for table in known_tables if table in text]
+        declared_tables = re.findall(r"(?:테이블은|tables?\s*(?:are|=|:))\s*([A-Za-z_][A-Za-z0-9_]*)", text, flags=re.IGNORECASE)
+        for table in declared_tables:
+            if table not in tables:
+                tables.append(table)
         explicit_pair_tables = re.findall(
             r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:테이블|db)?\s*(?:의|\.)\s*[A-Za-z_][A-Za-z0-9_]*",
             text,
