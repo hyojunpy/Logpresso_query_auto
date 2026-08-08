@@ -126,7 +126,7 @@ class QueryGenerator:
         context = payload.context.model_copy(deep=True)
         additions: list[str] = []
         try:
-            aliases = AliasStore(settings.db_path).list()
+            aliases = AliasStore(settings.db_path).list(payload.context.product)
         except Exception:
             return payload
         for alias in aliases:

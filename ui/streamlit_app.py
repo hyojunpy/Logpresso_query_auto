@@ -147,15 +147,16 @@ with st.sidebar:
         alias_phrase = st.text_input("업무 표현", key="alias_phrase", placeholder="예: 내부 방화벽")
         alias_target = st.text_input("테이블 또는 필드", key="alias_target", placeholder="예: corp_firewall_logs")
         alias_kind = st.selectbox("별칭 종류", ["table", "field"], key="alias_kind")
+        alias_scope = st.selectbox("적용 범위", ["공통", "ENT", "STD", "SNR", "FRS"], key="alias_scope")
         if st.button("별칭 저장"):
             try:
-                alias_store.save(alias_phrase, alias_target, alias_kind)
+                alias_store.save(alias_phrase, alias_target, alias_kind, "" if alias_scope == "공통" else alias_scope)
             except ValueError as error:
                 st.error(str(error))
             else:
                 st.success("별칭을 저장했습니다.")
                 st.rerun()
-        aliases = alias_store.list()
+        aliases = alias_store.list(product)
         if aliases:
             st.dataframe(aliases, use_container_width=True, hide_index=True)
             alias_to_delete = st.selectbox("삭제할 별칭", [""] + [f"{item['kind']}: {item['phrase']}" for item in aliases])
