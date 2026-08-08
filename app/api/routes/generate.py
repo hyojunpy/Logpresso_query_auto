@@ -68,9 +68,10 @@ def generate_query(payload: GenerateQueryRequest = Body(..., openapi_examples=GE
     response = QueryGenerator(_retriever()).generate(payload)
     FeedbackStore(settings.db_path).record_generation_outcome(payload.request, response.status)
     try:
-        MetricsStore(settings.metrics_db_path).increment(f"generation_{response.status}")
+        metrics = MetricsStore(settings.metrics_db_path, settings.metrics_retention_days)
+        metrics.increment(f"generation_{response.status}")
         if response.debug.get("llm_error_type"):
-            MetricsStore(settings.metrics_db_path).increment("generation_llm_fallback")
+            metrics.increment("generation_llm_fallback")
     except Exception:
         # Metrics remain optional even when the local SQLite file is unavailable.
         pass

@@ -17,6 +17,7 @@ class Settings:
     db_path: Path = data_dir / "app.db"
     # Separate from the document index so best-effort counters cannot lock it.
     metrics_db_path: Path = data_dir / "metrics.db"
+    metrics_retention_days: int = max(1, int(os.getenv("METRICS_RETENTION_DAYS", "30")))
     catalog_path: Path = data_dir / "catalog.json"
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")

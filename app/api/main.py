@@ -66,7 +66,9 @@ def create_app() -> FastAPI:
             },
         )
         try:
-            MetricsStore(settings.metrics_db_path).increment(f"http_status_{response.status_code}")
+            MetricsStore(settings.metrics_db_path, settings.metrics_retention_days).increment(
+                f"http_status_{response.status_code}"
+            )
         except Exception:
             # Operational counters are best-effort and must not affect user requests.
             logger.exception("metrics_record_failed")

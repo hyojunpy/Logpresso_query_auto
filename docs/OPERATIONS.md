@@ -74,3 +74,15 @@ When `ENABLE_DEV_EVALUATION=true`, the protected development endpoint
 `POST /api/v1/internal/verification/dry-run` demonstrates the contract using
 the no-op adapter. It always returns `external_call_made: false` and does not
 connect to Logpresso, even when a query is supplied.
+
+## Privacy-Safe Operational Metrics
+
+`GET /api/v1/internal/metrics` provides aggregate counts for HTTP response
+statuses, query-generation outcomes, and LLM fallback events. It never stores
+request text, generated queries, log contents, IP addresses, actor IDs, or
+timestamps more precise than a UTC date. The endpoint is covered by the same
+optional `MANAGEMENT_API_KEY` guard as other management APIs.
+
+Counters are stored separately in `data/metrics.db` and are automatically
+purged after 30 days. Set `METRICS_RETENTION_DAYS` to adjust the period; use a
+positive integer only.
