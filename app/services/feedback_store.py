@@ -40,6 +40,21 @@ class FeedbackStore:
             total = conn.execute("select count(*) from query_feedback").fetchone()[0]
         return {"total": total, "ratings": ratings, "issue_types": issues}
 
+    def improvement_candidates(self) -> list[dict[str, str | int]]:
+        summary = self.summary()
+        suggestions = {
+            "wrong_table": ("테이블 별칭 또는 카탈로그 보강", "업무 표현과 실제 테이블 이름의 매핑을 등록하세요."),
+            "wrong_field": ("필드 별칭 또는 카탈로그 보강", "업무 용어와 실제 필드 이름의 매핑을 등록하세요."),
+            "wrong_time_range": ("기간 해석 규칙 검토", "기본 기간 또는 기간 표현 별칭을 검토하세요."),
+            "invalid_syntax": ("문법 템플릿 검토", "생성된 명령과 옵션을 문서 근거로 재검토하세요."),
+            "irrelevant_query": ("요청 의도/별칭 보강", "업무 표현에 대한 별칭 또는 평가셋을 추가하세요."),
+        }
+        return [
+            {"issue_type": issue, "count": count, "title": suggestions[issue][0], "suggestion": suggestions[issue][1]}
+            for issue, count in summary["issue_types"].items()
+            if issue in suggestions
+        ]
+
     @staticmethod
     def _hash(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()

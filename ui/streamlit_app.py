@@ -117,6 +117,12 @@ with st.sidebar:
     feedback_summary = FeedbackStore(settings.db_path).summary()
     if feedback_summary["total"]:
         st.caption(f"저장된 피드백: {feedback_summary['total']}건 | 문제 유형: {feedback_summary['issue_types']}")
+        candidates = FeedbackStore(settings.db_path).improvement_candidates()
+        if candidates:
+            with st.expander("피드백 기반 개선 후보"):
+                for candidate in candidates:
+                    st.write(f"- {candidate['title']} ({candidate['count']}건)")
+                    st.caption(candidate["suggestion"])
     st.write(f"문서 인덱스: {'완료' if status['indexed'] else '미생성'}")
     st.write(f"문서 변경됨: {'예' if status['stale'] else '아니오'}")
     st.write(f"청크 수: {status['chunk_count']}")

@@ -16,3 +16,9 @@ def create_feedback(payload: FeedbackRequest = Body(...)):
 def feedback_summary():
     """TODO: protect feedback reporting with authentication in shared deployments."""
     return FeedbackStore(settings.db_path).summary()
+
+
+@router.get("/improvement-candidates")
+def improvement_candidates():
+    """TODO: protect reporting endpoints with authentication in shared deployments."""
+    return {"items": FeedbackStore(settings.db_path).improvement_candidates()}
