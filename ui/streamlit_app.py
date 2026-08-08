@@ -345,7 +345,8 @@ with st.sidebar:
         else:
             st.caption("표시할 관리 변경 이력이 없습니다.")
     with st.expander("운영 집계"):
-        metrics = MetricsStore(settings.metrics_db_path).summary()
+        metrics_store = MetricsStore(settings.metrics_db_path, settings.metrics_retention_days)
+        metrics = metrics_store.summary()
         if metrics:
             st.caption(
                 f"최근 {settings.metrics_retention_days}일 집계입니다. 요청·쿼리·IP 원문은 저장하지 않습니다."
@@ -358,6 +359,17 @@ with st.sidebar:
                 use_container_width=True,
                 hide_index=True,
             )
+            daily_metrics = metrics_store.daily_summary()
+            if daily_metrics:
+                st.caption("최근 일별 집계")
+                st.dataframe(
+                    [
+                        {"날짜(UTC)": item["day"], "항목": metric_label(str(item["metric"])), "횟수": item["count"]}
+                        for item in daily_metrics
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
         else:
             st.caption("표시할 집계가 없습니다. 요청·쿼리 원문은 저장하지 않습니다.")
     if settings.enable_dev_evaluation:

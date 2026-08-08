@@ -136,8 +136,13 @@ class OperationalMetricItem(BaseModel):
     count: int
 
 
+class DailyOperationalMetricItem(OperationalMetricItem):
+    day: str
+
+
 class OperationalMetricsResponse(BaseModel):
     metrics: dict[str, int]
     items: list[OperationalMetricItem]
+    daily_items: list[DailyOperationalMetricItem]
     retention_days: int
     contains_raw_content: bool = False

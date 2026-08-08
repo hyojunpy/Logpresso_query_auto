@@ -9,12 +9,18 @@ router = APIRouter()
 
 @router.get("", dependencies=[Depends(require_management_access)])
 def metrics_summary() -> OperationalMetricsResponse:
-    metrics = MetricsStore(settings.metrics_db_path).summary()
+    store = MetricsStore(settings.metrics_db_path, settings.metrics_retention_days)
+    metrics = store.summary()
+    daily_items = store.daily_summary()
     return OperationalMetricsResponse(
         metrics=metrics,
         items=[
             {"metric": metric, "label": metric_label(metric), "count": count}
             for metric, count in metrics.items()
+        ],
+        daily_items=[
+            {**item, "label": metric_label(str(item["metric"]))}
+            for item in daily_items
         ],
         retention_days=settings.metrics_retention_days,
     )

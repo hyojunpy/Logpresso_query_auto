@@ -53,3 +53,23 @@ class MetricsStore:
                     "select metric, sum(count) from operational_metric group by metric order by metric"
                 ).fetchall()
             )
+
+    def daily_summary(self, days: int = 7) -> list[dict[str, str | int]]:
+        if not self.db_path.exists():
+            return []
+        window = max(1, min(days, self.retention_days))
+        cutoff = (datetime.now(UTC).date() - timedelta(days=window - 1)).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            exists = conn.execute(
+                "select 1 from sqlite_master where type='table' and name='operational_metric'"
+            ).fetchone()
+            if not exists:
+                return []
+            return [
+                {"day": day, "metric": metric, "count": count}
+                for day, metric, count in conn.execute(
+                    "select day, metric, count from operational_metric "
+                    "where day >= ? order by day desc, metric",
+                    (cutoff,),
+                ).fetchall()
+            ]
