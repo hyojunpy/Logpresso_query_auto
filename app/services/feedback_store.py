@@ -30,7 +30,7 @@ class FeedbackStore:
 
     def summary(self) -> dict[str, object]:
         if not self.db_path.exists():
-            return {"total": 0, "ratings": {}, "issue_types": {}}
+            return {"total": 0, "ratings": {}, "issue_types": {}, "unresolved_outcomes": {}}
         with sqlite3.connect(self.db_path) as conn:
             self._ensure_outcomes(conn)
             unresolved = dict(conn.execute("select result_status, count(*) from generation_outcome where result_status != 'generated' group by result_status").fetchall())

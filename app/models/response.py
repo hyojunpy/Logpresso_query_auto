@@ -103,6 +103,7 @@ class FeedbackSummaryResponse(BaseModel):
     total: int
     ratings: dict[str, int]
     issue_types: dict[str, int]
+    unresolved_outcomes: dict[str, int] = {}
 
 
 class ImprovementCandidate(BaseModel):
@@ -122,3 +123,4 @@ class ImprovementReportResponse(BaseModel):
     issue_types: dict[str, int]
     candidates: list[ImprovementCandidate]
     priority_issue_types: list[str]
+    unresolved_outcomes: dict[str, int] = {}

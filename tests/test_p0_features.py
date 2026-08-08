@@ -270,7 +270,7 @@ def test_feedback_summary_does_not_return_raw_text():
     from app.api.main import app
     from fastapi.testclient import TestClient
     body = TestClient(app).get("/api/v1/feedback/summary").json()
-    assert {"total", "ratings", "issue_types"}.issubset(body)
+    assert {"total", "ratings", "issue_types", "unresolved_outcomes"}.issubset(body)
     assert "request_text" not in body and "generated_query" not in body
 
 

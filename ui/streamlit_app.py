@@ -121,8 +121,12 @@ with st.sidebar:
     st.write(f"LLM model: `{settings.ollama_model if settings.llm_provider == 'ollama' else settings.openai_model}`")
     st.caption("모델 변경은 `.env`의 `OLLAMA_MODEL` 또는 `OPENAI_MODEL`을 바꾼 뒤 서버를 재시작하면 적용됩니다.")
     feedback_summary = FeedbackStore(settings.db_path).summary()
-    if feedback_summary["total"]:
+    unresolved_outcomes = feedback_summary.get("unresolved_outcomes", {})
+    if feedback_summary["total"] or unresolved_outcomes:
         st.caption(f"저장된 피드백: {feedback_summary['total']}건 | 문제 유형: {feedback_summary['issue_types']}")
+        if unresolved_outcomes:
+            labels = {"needs_clarification": "확인 질문 필요", "unsupported": "지원 불가"}
+            st.caption("자동 수집된 미해결 요청: " + ", ".join(f"{labels.get(status, status)} {count}건" for status, count in unresolved_outcomes.items()))
         candidates = FeedbackStore(settings.db_path).improvement_candidates()
         if candidates:
             with st.expander("피드백 기반 개선 후보"):
