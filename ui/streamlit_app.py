@@ -269,11 +269,13 @@ def current_context() -> RequestContext:
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_tables.split(",") if value.strip()]
+            + st.session_state.get("learned_tables", [])
             + [table.table_name for table in catalog_tables + request_tables]
         )),
         known_fields=list(dict.fromkeys(
             [line.strip() for line in known_fields.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_fields.split(",") if value.strip()]
+            + st.session_state.get("learned_fields", [])
             + [field.field_name for table in catalog_tables + request_tables for field in table.fields]
         )),
         known_loggers=[line.strip() for line in known_loggers.splitlines() if line.strip()],
@@ -478,6 +480,12 @@ if response:
                 st.session_state["edited_query_analysis_fingerprint"] = edited_fingerprint
             if edited_analysis := st.session_state.get("edited_query_analysis"):
                 render_revalidation_summary(edited_analysis)
+                if edited_analysis.get("validation", {}).get("valid") and st.button("이 수정 기준을 이번 세션에 기억"):
+                    tables = CatalogService._tables(edited_query)
+                    fields = sorted(CatalogService._field_refs(edited_query))
+                    st.session_state["learned_tables"] = list(dict.fromkeys([*st.session_state.get("learned_tables", []), *tables]))
+                    st.session_state["learned_fields"] = list(dict.fromkeys([*st.session_state.get("learned_fields", []), *fields]))
+                    st.success("다음 요청부터 이번 세션의 테이블·필드 힌트로 사용합니다.")
         else:
             st.error("쿼리를 생성하지 못했습니다.")
     with tabs[1]:
