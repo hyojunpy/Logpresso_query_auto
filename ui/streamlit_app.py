@@ -135,6 +135,7 @@ with st.sidebar:
     generation_mode = st.selectbox(
         "생성 모드",
         ["자동", "빠른 규칙 기반", "Ollama 보조"],
+        index=1,
         help="빠른 규칙 기반은 로컬 모델 호출 없이 안전한 템플릿을 우선합니다.",
     )
     version = st.text_input("버전")
