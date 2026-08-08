@@ -89,6 +89,8 @@ pip install -c requirements.lock -e '.[dev]'
 
 ## 환경 변수
 
+운영 권한 경계와 고객사 파일 기반 카탈로그 교환 방식은 [OPERATIONS.md](docs/OPERATIONS.md)를 참고하세요. CSV 카탈로그 예시는 [catalog-template.csv](docs/catalog-template.csv)입니다.
+
 `.env.example`을 참고해 필요한 값을 설정합니다. 기본값은 외부 모델 호출이 없는 `mock` 모드입니다.
 
 ```env

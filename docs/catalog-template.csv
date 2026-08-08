@@ -1,0 +1,6 @@
+table_name,field_name,field_type,description
+firewall_logs,src_ip,ip,source address
+firewall_logs,dst_ip,ip,destination address
+firewall_logs,action,string,allow or deny action
+firewall_logs,_time,timestamp,event time
+insa,ip,ip,employee address
