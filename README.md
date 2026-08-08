@@ -183,6 +183,7 @@ insa: ip, employee_id
 | Method | Path | 설명 |
 | --- | --- | --- |
 | `GET` | `/api/v1/health` | 상태 확인 |
+| `GET` | `/api/v1/ready` | 문서·인덱스 기반 생성 준비 상태 확인 |
 | `POST` | `/api/v1/query/generate` | 자연어 요청으로 쿼리 생성 |
 | `POST` | `/api/v1/query/validate` | 문법 및 스키마 검증 |
 | `POST` | `/api/v1/query/analyze` | 검증, 품질, 실행 준비 정보 분석 |
@@ -209,6 +210,11 @@ insa: ip, employee_id
 - `schema_validation`: 테이블/필드/타입 기반 검증 결과
 - `quality`: 점수, 위험도, 진단 코드, 점수 감점 근거
 - `execution_preview`: 실행 준비 상태와 확인 필요 사유
+
+`/health`는 프로세스 생존 확인용이며, `/ready`는 기준 문서 존재 여부와 문서
+인덱스 최신성까지 검사합니다. 준비되지 않은 경우 `/ready`는 `503`과 함께
+`failures`를 반환합니다. 두 엔드포인트 모두 Logpresso 또는 LLM에 외부 호출을
+하지 않습니다.
 
 ## 카탈로그 검증
 

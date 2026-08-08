@@ -33,6 +33,48 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_readiness_reports_document_index_state_without_external_call(self):
+        from app.core.config import settings
+        from app.services.indexer import DocumentIndex
+
+        original_doc_path = settings.doc_path
+        original_db_path = settings.db_path
+        original_catalog_path = settings.catalog_path
+        try:
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                settings.doc_path = root / "manual.docx"
+                settings.db_path = root / "index.db"
+                settings.catalog_path = root / "catalog.json"
+                write_docx(settings.doc_path, "table duration=24h sample_logs")
+                DocumentIndex(settings.db_path).rebuild(settings.doc_path)
+
+                response = self.client.get("/api/v1/ready")
+        finally:
+            settings.doc_path = original_doc_path
+            settings.db_path = original_db_path
+            settings.catalog_path = original_catalog_path
+
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["status"], "ready")
+        self.assertTrue(body["checks"]["document_available"])
+        self.assertTrue(body["checks"]["index"]["indexed"])
+        self.assertFalse(body["checks"]["external_call_made"])
+
+    def test_readiness_identifies_missing_reference_document(self):
+        from app.core.config import settings
+
+        original_doc_path = settings.doc_path
+        try:
+            settings.doc_path = Path("docs") / "missing-reference.docx"
+            response = self.client.get("/api/v1/ready")
+        finally:
+            settings.doc_path = original_doc_path
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("reference_document_missing", response.json()["failures"])
+
     def test_openapi_exposes_catalog_and_feedback_report_contracts(self):
         schemas = self.client.get("/openapi.json").json()["components"]["schemas"]
         self.assertIn("Catalog", schemas)
