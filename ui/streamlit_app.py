@@ -400,7 +400,13 @@ def generate(text: str, *, clear_answer: bool = True) -> None:
     payload = GenerateQueryRequest(request=enriched_text, context=context)
     llm = MockProvider() if generation_mode == "빠른 규칙 기반" else None
     generator = QueryGenerator(Retriever(index), llm=llm)
-    response = generator.generate(payload)
+    original_timeout = settings.ollama_timeout_seconds
+    if generation_mode == "Ollama 보조":
+        settings.ollama_timeout_seconds = min(original_timeout, 30)
+    try:
+        response = generator.generate(payload)
+    finally:
+        settings.ollama_timeout_seconds = original_timeout
     st.session_state["request_text"] = text
     st.session_state["response"] = response.model_dump()
     st.session_state["response_fingerprint"] = request_fingerprint(text, context)
