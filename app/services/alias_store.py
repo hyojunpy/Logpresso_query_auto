@@ -31,6 +31,32 @@ class AliasStore:
         return item
 
     def import_csv_bytes(self, content: bytes) -> int:
+        items = self.parse_csv_bytes(content)
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure(conn)
+            for item in items:
+                conn.execute("delete from query_alias where phrase=? and kind=? and scope=?", (item["phrase"], item["kind"], item["scope"]))
+                conn.execute("insert into query_alias(phrase, target, kind, scope) values (?, ?, ?, ?)", tuple(item.values()))
+            conn.commit()
+        return len(items)
+
+    def preview_csv_bytes(self, content: bytes) -> list[dict[str, str]]:
+        items = self.parse_csv_bytes(content)
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure(conn)
+            existing = {
+                (phrase, kind, scope): target
+                for phrase, target, kind, scope in conn.execute("select phrase, target, kind, scope from query_alias")
+            }
+        preview = []
+        for item in items:
+            previous = existing.get((item["phrase"], item["kind"], item["scope"]))
+            change = "new" if previous is None else "unchanged" if previous == item["target"] else "update"
+            preview.append({**item, "change": change, "previous_target": previous or ""})
+        return preview
+
+    @staticmethod
+    def parse_csv_bytes(content: bytes) -> list[dict[str, str]]:
         try:
             rows = list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))
         except UnicodeDecodeError as error:
@@ -47,7 +73,7 @@ class AliasStore:
         keys: set[tuple[str, str, str]] = set()
         for number, row in enumerate(rows, start=2):
             try:
-                item = self._normalized(row.get("phrase", ""), row.get("target", ""), row.get("kind") or "table", row.get("scope") or "")
+                item = AliasStore._normalized(row.get("phrase", ""), row.get("target", ""), row.get("kind") or "table", row.get("scope") or "")
             except ValueError as error:
                 raise AliasImportError(f"row {number}: {error}") from error
             key = (item["phrase"], item["kind"], item["scope"])
@@ -55,13 +81,7 @@ class AliasStore:
                 raise AliasImportError(f"row {number}: duplicate phrase, kind, and scope")
             keys.add(key)
             items.append(item)
-        with sqlite3.connect(self.db_path) as conn:
-            self._ensure(conn)
-            for item in items:
-                conn.execute("delete from query_alias where phrase=? and kind=? and scope=?", (item["phrase"], item["kind"], item["scope"]))
-                conn.execute("insert into query_alias(phrase, target, kind, scope) values (?, ?, ?, ?)", tuple(item.values()))
-            conn.commit()
-        return len(items)
+        return items
 
     def delete(self, phrase: str, kind: str, scope: str = "") -> bool:
         with sqlite3.connect(self.db_path) as conn:

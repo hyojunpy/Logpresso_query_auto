@@ -11,6 +11,7 @@ from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.feedback_store import FeedbackStore
 from app.services.alias_store import AliasImportError, AliasStore
+from app.services.audit_store import AuditStore
 from app.services.generation_comparison import append_comparison_history, comparison_history_rows, compare_generation_results
 from app.services.session_hints import merge_hints, remove_hint
 from app.services.execution_preview import ExecutionPreviewService
@@ -162,7 +163,16 @@ with st.sidebar:
         alias_store = AliasStore(settings.db_path)
         alias_file = st.file_uploader("별칭 CSV 가져오기", type=["csv"], key="alias_csv_import")
         st.caption("CSV 열: phrase,target,kind,scope (kind와 scope는 선택)")
-        if alias_file is not None and st.button("별칭 CSV 저장"):
+        alias_preview = []
+        if alias_file is not None:
+            try:
+                alias_preview = alias_store.preview_csv_bytes(alias_file.getvalue())
+            except AliasImportError as error:
+                st.error(f"별칭 CSV 오류: {error}")
+            else:
+                st.dataframe(alias_preview, use_container_width=True, hide_index=True)
+        import_confirmed = st.checkbox("미리보기와 변경 대상이 맞는지 확인했습니다.", key="alias_csv_import_confirmed")
+        if alias_file is not None and st.button("별칭 CSV 저장", disabled=not alias_preview or not import_confirmed):
             try:
                 count = alias_store.import_csv_bytes(alias_file.getvalue())
             except AliasImportError as error:
@@ -306,6 +316,12 @@ with st.sidebar:
         st.success("DRY RUN 준비 완료")
         st.write("실제 Logpresso 실행은 비활성화되어 있습니다.")
         st.caption("생성 쿼리는 검증 후 복사해서 Logpresso에서 수동 실행합니다.")
+    with st.expander("관리 변경 이력"):
+        events = AuditStore(settings.db_path).recent(30)
+        if events:
+            st.dataframe(events, use_container_width=True, hide_index=True)
+        else:
+            st.caption("표시할 관리 변경 이력이 없습니다.")
 
 st.title("로그프레소 자연어 쿼리 생성기")
 
