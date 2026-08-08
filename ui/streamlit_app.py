@@ -23,6 +23,8 @@ from app.services.intent_parser import IntentParser
 from app.services.llm.mock_provider import MockProvider
 from app.services.query_validator import QueryValidator
 from app.services.retriever import Retriever
+from app.services.query_suggestions import apply_safe_suggestion
+from app.services.query_history import append_version, query_diff
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -544,6 +546,7 @@ def generate(text: str, *, clear_answer: bool = True) -> None:
     st.session_state["response"] = response.model_dump()
     st.session_state["response_fingerprint"] = request_fingerprint(text, context)
     st.session_state["editable_query"] = response.query or ""
+    st.session_state["query_versions"] = [response.query] if response.query else []
     st.session_state["editable_query_source"] = st.session_state["response_fingerprint"]
     st.session_state.pop("edited_query_analysis", None)
     st.session_state.pop("edited_query_analysis_fingerprint", None)
@@ -591,6 +594,15 @@ if response:
     if st.session_state.get("editable_query_source") != st.session_state.get("response_fingerprint"):
         st.session_state["editable_query"] = response.get("query") or ""
         st.session_state["editable_query_source"] = st.session_state.get("response_fingerprint")
+    if suggestion_code := st.session_state.pop("pending_query_suggestion", None):
+        suggested_query = apply_safe_suggestion(st.session_state.get("editable_query", ""), suggestion_code)
+        if suggested_query:
+            st.session_state["editable_query"] = suggested_query
+            st.session_state["suggestion_applied_notice"] = suggestion_code
+    if version_to_restore := st.session_state.pop("pending_query_version_restore", None):
+        versions = st.session_state.get("query_versions", [])
+        if isinstance(version_to_restore, int) and 0 <= version_to_restore < len(versions):
+            st.session_state["editable_query"] = versions[version_to_restore]
     tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조", "구조화 요청", "디버그"])
     with tabs[0]:
         if needs_clarification:
@@ -598,6 +610,8 @@ if response:
                 st.write(f"- {question}")
         elif response.get("query"):
             st.code(response["query"], language="sql")
+            if notice := st.session_state.pop("suggestion_applied_notice", None):
+                st.info(f"'{notice}' 제안을 편집 쿼리에 반영했습니다. 재검증 후 검토하세요.")
             with st.expander("규칙 기반과 Ollama 결과 비교"):
                 st.caption("비교는 쿼리 초안과 검증 정보만 보여 주며, 실제 Logpresso 실행은 하지 않습니다.")
                 if settings.llm_provider != "ollama":
@@ -631,6 +645,7 @@ if response:
                 st.session_state.pop("edited_query_analysis", None)
                 st.session_state.pop("edited_query_analysis_fingerprint", None)
             if st.button("수정 쿼리 재검증"):
+                st.session_state["query_versions"] = append_version(st.session_state.get("query_versions", []), edited_query)
                 st.session_state["edited_query_analysis"] = analyze_query_data(edited_query, current_context())
                 st.session_state["edited_query_analysis_fingerprint"] = edited_fingerprint
             if edited_analysis := st.session_state.get("edited_query_analysis"):
@@ -641,6 +656,14 @@ if response:
                     st.session_state["learned_tables"] = merge_hints(st.session_state.get("learned_tables", []), tables)
                     st.session_state["learned_fields"] = merge_hints(st.session_state.get("learned_fields", []), fields)
                     st.success("다음 요청부터 이번 세션의 테이블·필드 힌트로 사용합니다.")
+            versions = st.session_state.get("query_versions", [])
+            if len(versions) > 1:
+                with st.expander("편집 이력 비교"):
+                    version_index = st.selectbox("되돌릴 버전", list(range(len(versions) - 1)), format_func=lambda index: f"버전 {index + 1}")
+                    st.code(query_diff(versions[version_index], edited_query) or "변경 없음", language="diff")
+                    if st.button("선택 버전으로 되돌리기"):
+                        st.session_state["pending_query_version_restore"] = version_index
+                        st.rerun()
         else:
             st.error("쿼리를 생성하지 못했습니다.")
     with tabs[1]:
@@ -683,7 +706,7 @@ if response:
                 else:
                     st.info(text)
                 if suggestion and st.button("제안 반영", key=f"apply_suggestion_{issue.get('code')}"):
-                    generate(request_text + "\n개선 조건: " + suggestion)
+                    st.session_state["pending_query_suggestion"] = issue.get("code")
                     st.rerun()
         st.subheader("실행 준비 상태")
         if preview:
