@@ -27,6 +27,8 @@ class Settings:
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     # A timeout falls back to a validated template, so do not leave the UI waiting for minutes.
     ollama_timeout_seconds: float = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "45"))
+    llm_context_limit: int = max(1, int(os.getenv("LLM_CONTEXT_LIMIT", "4")))
+    llm_context_excerpt_chars: int = max(100, int(os.getenv("LLM_CONTEXT_EXCERPT_CHARS", "600")))
     enable_llm_intent_fallback: bool = os.getenv("ENABLE_LLM_INTENT_FALLBACK", "true").lower() in {"1", "true", "yes"}
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}

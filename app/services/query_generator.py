@@ -537,17 +537,7 @@ class QueryGenerator:
         return digits[:14]
 
     def _generation_prompt(self, payload: GenerateQueryRequest, intent: QueryIntent, results) -> str:
-        context = [
-            {
-                "entry_name": result.entry_name,
-                "section": result.section,
-                "content_type": result.content_type,
-                "excerpt": result.excerpt,
-                "options": result.options,
-                "functions": result.functions,
-            }
-            for result in results
-        ]
+        context = self._llm_context(results)
         body = {
             "task": "Generate a Logpresso query as JSON. Use only the provided manual context.",
             "request": payload.request,
@@ -561,6 +551,20 @@ class QueryGenerator:
             },
         }
         return json.dumps(body, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _llm_context(results) -> list[dict[str, object]]:
+        return [
+            {
+                "entry_name": result.entry_name,
+                "section": result.section,
+                "content_type": result.content_type,
+                "excerpt": result.excerpt[:settings.llm_context_excerpt_chars],
+                "options": result.options,
+                "functions": result.functions,
+            }
+            for result in results[:settings.llm_context_limit]
+        ]
 
     def _intent_resolution_prompt(self, payload: GenerateQueryRequest, intent: QueryIntent, results) -> str:
         body = {
@@ -616,16 +620,7 @@ class QueryGenerator:
             "task": "Repair this Logpresso query. Return JSON only. Do not invent unsupported syntax.",
             "query": query,
             "errors": [error.model_dump() for error in errors],
-            "context": [
-                {
-                    "entry_name": result.entry_name,
-                    "section": result.section,
-                    "excerpt": result.excerpt,
-                    "options": result.options,
-                    "functions": result.functions,
-                }
-                for result in results
-            ],
+            "context": self._llm_context(results),
             "required_json_schema": {
                 "status": "generated|unsupported",
                 "query": "string or null",

@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from app.core.config import settings
+from app.models.document import SearchResult
 from app.models.request import Catalog, CatalogField, CatalogTable, GenerateQueryRequest, RequestContext
 from app.services.llm.mock_provider import MockProvider
 from app.services.query_generator import QueryGenerator
@@ -15,6 +16,26 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_llm_context_is_bounded_before_sending_to_provider(self):
+        results = [
+            SearchResult(
+                entry_name=f"command_{index}",
+                section="reference",
+                score=1,
+                excerpt="x" * 20,
+                source="manual",
+                content_type="syntax",
+            )
+            for index in range(3)
+        ]
+        with patch.object(settings, "llm_context_limit", 2), patch.object(
+            settings, "llm_context_excerpt_chars", 7
+        ):
+            context = QueryGenerator._llm_context(results)
+
+        self.assertEqual(len(context), 2)
+        self.assertEqual(context[0]["excerpt"], "x" * 7)
+
     def test_generates_realtime_stream_query_with_filter(self):
         response = generator().generate(
             GenerateQueryRequest(
