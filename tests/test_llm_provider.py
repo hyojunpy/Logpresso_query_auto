@@ -122,6 +122,14 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(data["error_type"], "timeout")
         urlopen.assert_called_once()
 
+    def test_ollama_provider_marks_malformed_model_output_as_invalid_response(self):
+        payload = {"response": "not a JSON response", "total_duration": 2_000_000}
+        with patch("app.services.llm.ollama_provider.request.urlopen", return_value=FakeResponse(payload)):
+            data = OllamaProvider().generate_json("prompt", [])
+
+        self.assertEqual(data["error_type"], "invalid_response")
+        self.assertEqual(data["timing"]["total_duration_ms"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

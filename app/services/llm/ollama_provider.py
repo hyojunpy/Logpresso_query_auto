@@ -52,6 +52,14 @@ class OllamaProvider(LLMProvider):
                 with request.urlopen(req, timeout=settings.ollama_timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                     data = parse_json_object(raw.get("response", raw))
+                    if data.get("status") not in {"generated", "needs_clarification", "unsupported"}:
+                        return _error(
+                            "invalid_response",
+                            "Ollama returned an invalid response",
+                            attempt,
+                            started,
+                            raw,
+                        )
                     data["retry_count"] = attempt
                     data["timing"] = _timing_metadata(raw, perf_counter() - started)
                     return data
@@ -73,13 +81,19 @@ class OllamaProvider(LLMProvider):
         return {"status": "error", "error_type": "unknown", "message": "Ollama request failed"}
 
 
-def _error(error_type: str, message: str, retry_count: int, started: float) -> dict[str, Any]:
+def _error(
+    error_type: str,
+    message: str,
+    retry_count: int,
+    started: float,
+    raw: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "status": "error",
         "error_type": error_type,
         "message": message,
         "retry_count": retry_count,
-        "timing": _timing_metadata({}, perf_counter() - started),
+        "timing": _timing_metadata(raw or {}, perf_counter() - started),
     }
 
 
