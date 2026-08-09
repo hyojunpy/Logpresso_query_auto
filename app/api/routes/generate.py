@@ -12,7 +12,7 @@ from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.retriever import Retriever
 from app.services.feedback_store import FeedbackStore
-from app.services.metrics_store import MetricsStore
+from app.services.metrics_store import MetricsStore, duration_bucket_metric
 
 router = APIRouter()
 
@@ -72,6 +72,12 @@ def generate_query(payload: GenerateQueryRequest = Body(..., openapi_examples=GE
         metrics.increment(f"generation_{response.status}")
         if response.debug.get("llm_error_type"):
             metrics.increment("generation_llm_fallback")
+        if settings.llm_provider == "ollama":
+            timing = response.debug.get("llm_timing", {})
+            if isinstance(timing, dict):
+                for name, value in timing.items():
+                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                        metrics.increment(duration_bucket_metric(f"ollama_{name}", value))
     except Exception:
         # Metrics remain optional even when the local SQLite file is unavailable.
         pass

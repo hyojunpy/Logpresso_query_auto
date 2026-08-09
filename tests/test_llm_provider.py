@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 import json
 
 from app.services.llm.json_utils import parse_json_object
@@ -40,10 +40,16 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(data["query"], "table logs")
 
     def test_ollama_provider_parses_response_json(self):
-        payload = {"response": '{"status":"generated","query":"table logs"}'}
+        payload = {
+            "response": '{"status":"generated","query":"table logs"}',
+            "total_duration": 2_000_000,
+            "load_duration": 1_000_000,
+        }
         with patch("app.services.llm.ollama_provider.request.urlopen", return_value=FakeResponse(payload)):
             data = OllamaProvider().generate_json("prompt", [])
         self.assertEqual(data["query"], "table logs")
+        self.assertEqual(data["timing"]["total_duration_ms"], 2)
+        self.assertEqual(data["timing"]["load_duration_ms"], 1)
 
     def test_ollama_provider_retries_temporary_connection_failure_once(self):
         payload = {"response": '{"status":"generated","query":"table logs"}'}
@@ -51,6 +57,31 @@ class LLMProviderTest(unittest.TestCase):
             data = OllamaProvider().generate_json("prompt", [])
         self.assertEqual(data["query"], "table logs")
         self.assertEqual(data["retry_count"], 1)
+
+    def test_ollama_provider_retries_http_5xx_once(self):
+        payload = {"response": '{"status":"generated","query":"table logs"}'}
+        server_error = HTTPError("http://ollama.invalid", 500, "error", None, None)
+        with patch(
+            "app.services.llm.ollama_provider.request.urlopen",
+            side_effect=[server_error, FakeResponse(payload)],
+        ) as urlopen:
+            data = OllamaProvider().generate_json("prompt", [])
+
+        self.assertEqual(data["query"], "table logs")
+        self.assertEqual(data["retry_count"], 1)
+        self.assertEqual(urlopen.call_count, 2)
+
+    def test_ollama_provider_does_not_retry_http_4xx(self):
+        client_error = HTTPError("http://ollama.invalid", 400, "error", None, None)
+        with patch(
+            "app.services.llm.ollama_provider.request.urlopen",
+            side_effect=client_error,
+        ) as urlopen:
+            data = OllamaProvider().generate_json("prompt", [])
+
+        self.assertEqual(data["error_type"], "http_error")
+        self.assertEqual(data["retry_count"], 0)
+        urlopen.assert_called_once()
 
     def test_ollama_provider_does_not_retry_a_timeout(self):
         with patch(
@@ -80,6 +111,16 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(data["status"], "error")
         self.assertEqual(data["error_type"], "connection_error")
         self.assertNotIn("private network detail", str(data))
+
+    def test_ollama_provider_does_not_retry_timeout_wrapped_by_url_error(self):
+        with patch(
+            "app.services.llm.ollama_provider.request.urlopen",
+            side_effect=URLError(TimeoutError()),
+        ) as urlopen:
+            data = OllamaProvider().generate_json("prompt", [])
+
+        self.assertEqual(data["error_type"], "timeout")
+        urlopen.assert_called_once()
 
 
 if __name__ == "__main__":

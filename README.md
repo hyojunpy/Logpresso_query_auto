@@ -99,6 +99,10 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1
+OLLAMA_TIMEOUT_SECONDS=45
+OLLAMA_NUM_PREDICT=96
+LLM_CONTEXT_LIMIT=4
+LLM_CONTEXT_EXCERPT_CHARS=600
 RETRIEVAL_LIMIT=8
 LOG_LEVEL=INFO
 CORS_ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
@@ -112,6 +116,15 @@ MANAGEMENT_API_KEY=
 - `mock`: 외부 LLM 없이 규칙 및 문서 검색 기반 생성
 - `openai`: `OPENAI_API_KEY` 필요
 - `ollama`: `OLLAMA_BASE_URL`의 로컬 Ollama 서버 사용
+
+Ollama 응답 속도 조정:
+
+- `OLLAMA_TIMEOUT_SECONDS`: 로컬 모델 응답 대기 시간입니다. 기본값은 `45`초이며, 시간 초과 시 재시도하지 않고 검증 가능한 규칙 기반 초안으로 전환합니다.
+- `OLLAMA_NUM_PREDICT`: 한 번의 생성에서 허용하는 최대 출력 토큰 수입니다. 기본값은 `96`입니다.
+- `LLM_CONTEXT_LIMIT`: LLM에 전달할 검색 근거의 최대 개수입니다. 기본값은 `4`입니다.
+- `LLM_CONTEXT_EXCERPT_CHARS`: 근거 문서별 전달할 최대 문자 수입니다. 기본값은 `600`입니다.
+
+검색 근거는 LLM 프롬프트에만 축소 적용됩니다. 최종 생성 쿼리의 문서 근거 검증 정책은 유지됩니다.
 
 ## 문서 인덱싱
 

@@ -41,12 +41,26 @@ def run_checks(config: Any) -> dict[str, object]:
         errors.append("openai_api_key_missing")
     elif config.llm_provider == "ollama":
         warnings.append("ollama_connectivity_not_checked")
+    _check_llm_limits(config, errors, checks)
     public_origins = [origin for origin in config.cors_allowed_origins if not origin.startswith("http://localhost") and not origin.startswith("http://127.0.0.1")]
     checks["cors_allowed_origins"] = list(config.cors_allowed_origins)
     if public_origins and not config.management_api_key:
         warnings.append("management_api_key_not_configured_for_nonlocal_cors")
     checks["management_api_key_configured"] = bool(config.management_api_key)
     return {"status": "failed" if errors else "passed", "errors": errors, "warnings": warnings, "checks": checks}
+
+
+def _check_llm_limits(config: Any, errors: list[str], checks: dict[str, object]) -> None:
+    limits = {
+        "ollama_timeout_seconds": (getattr(config, "ollama_timeout_seconds", 45), 1, 300),
+        "ollama_num_predict": (getattr(config, "ollama_num_predict", 96), 16, 2_048),
+        "llm_context_limit": (getattr(config, "llm_context_limit", 4), 1, 32),
+        "llm_context_excerpt_chars": (getattr(config, "llm_context_excerpt_chars", 600), 100, 10_000),
+    }
+    for name, (value, minimum, maximum) in limits.items():
+        checks[name] = value
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not minimum <= value <= maximum:
+            errors.append(f"{name}_out_of_range")
 
 
 def main() -> int:

@@ -31,7 +31,7 @@ class QueryGeneratorTest(unittest.TestCase):
         with patch.object(settings, "llm_context_limit", 2), patch.object(
             settings, "llm_context_excerpt_chars", 7
         ):
-            context = QueryGenerator._llm_context(results)
+            context = generator()._llm_context(results)
 
         self.assertEqual(len(context), 2)
         self.assertEqual(context[0]["excerpt"], "x" * 7)
@@ -387,6 +387,24 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertTrue(any("Ollama 서버" in item for item in response.assumptions))
         self.assertEqual(response.debug["llm_error_type"], "connection_error")
         self.assertFalse(response.debug["llm_used"])
+
+    def test_llm_timing_keeps_only_safe_numeric_metadata(self):
+        response = generator(
+            MockProvider(
+                generation_response={
+                    "status": "error",
+                    "error_type": "connection_error",
+                    "timing": {"client_duration_ms": 25, "response": "private query", "load_duration_ms": -1},
+                }
+            )
+        ).generate(
+            GenerateQueryRequest(
+                request="최근 24시간 firewall_logs에서 차단 로그 보여줘",
+                context=RequestContext(known_tables=["firewall_logs"], known_fields=["action", "_time"]),
+            )
+        )
+
+        self.assertEqual(response.debug["llm_timing"], {"client_duration_ms": 25})
 
     def test_llm_resolves_missing_intent_when_real_provider_is_enabled(self):
         instance = generator(

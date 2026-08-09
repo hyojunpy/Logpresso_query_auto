@@ -2,6 +2,7 @@ from typing import Any
 from urllib import request
 from urllib.error import HTTPError, URLError
 import json
+from time import perf_counter
 
 from app.core.config import settings
 from app.models.document import SearchResult
@@ -35,7 +36,7 @@ class OllamaProvider(LLMProvider):
                 "format": response_format,
                 "options": {
                     "temperature": 0,
-                    "num_predict": 96,
+                    "num_predict": settings.ollama_num_predict,
                 },
             }
         ).encode("utf-8")
@@ -46,25 +47,52 @@ class OllamaProvider(LLMProvider):
             method="POST",
         )
         for attempt in range(2):
+            started = perf_counter()
             try:
                 with request.urlopen(req, timeout=settings.ollama_timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                     data = parse_json_object(raw.get("response", raw))
                     data["retry_count"] = attempt
+                    data["timing"] = _timing_metadata(raw, perf_counter() - started)
                     return data
             except TimeoutError:
-                return {"status": "error", "error_type": "timeout", "message": "Ollama request timed out", "retry_count": attempt}
+                return _error("timeout", "Ollama request timed out", attempt, started)
             except HTTPError as exc:
                 error = {"status": "error", "error_type": "http_error", "message": f"Ollama returned HTTP {exc.code}"}
                 if exc.code < 500:
-                    return error
+                    return {**error, "retry_count": attempt, "timing": _timing_metadata({}, perf_counter() - started)}
             except URLError as exc:
                 error_type = "timeout" if isinstance(exc.reason, TimeoutError) else "connection_error"
                 error = {"status": "error", "error_type": error_type, "message": "Ollama connection failed"}
                 if error_type == "timeout":
-                    return {**error, "retry_count": attempt}
+                    return {**error, "retry_count": attempt, "timing": _timing_metadata({}, perf_counter() - started)}
             except (json.JSONDecodeError, ValueError, TypeError):
-                return {"status": "error", "error_type": "invalid_response", "message": "Ollama returned an invalid response"}
+                return _error("invalid_response", "Ollama returned an invalid response", attempt, started)
             if attempt == 1:
-                return {**error, "retry_count": attempt}
+                return {**error, "retry_count": attempt, "timing": _timing_metadata({}, perf_counter() - started)}
         return {"status": "error", "error_type": "unknown", "message": "Ollama request failed"}
+
+
+def _error(error_type: str, message: str, retry_count: int, started: float) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "error_type": error_type,
+        "message": message,
+        "retry_count": retry_count,
+        "timing": _timing_metadata({}, perf_counter() - started),
+    }
+
+
+def _timing_metadata(raw: dict[str, Any], elapsed_seconds: float) -> dict[str, int]:
+    """Expose only numeric timing data; response text and request content never leave the provider."""
+    timing = {"client_duration_ms": max(0, round(elapsed_seconds * 1000))}
+    for source, target in {
+        "total_duration": "total_duration_ms",
+        "load_duration": "load_duration_ms",
+        "prompt_eval_duration": "prompt_eval_duration_ms",
+        "eval_duration": "eval_duration_ms",
+    }.items():
+        value = raw.get(source)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            timing[target] = round(value / 1_000_000)
+    return timing

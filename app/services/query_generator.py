@@ -21,7 +21,13 @@ from app.services.alias_store import AliasStore
 
 
 class QueryGenerator:
-    def __init__(self, retriever: Retriever, llm: LLMProvider | None = None):
+    def __init__(
+        self,
+        retriever: Retriever,
+        llm: LLMProvider | None = None,
+        llm_context_limit: int | None = None,
+        llm_context_excerpt_chars: int | None = None,
+    ):
         self.retriever = retriever
         self.intent_parser = IntentParser()
         self.validator = QueryValidator(retriever)
@@ -29,6 +35,12 @@ class QueryGenerator:
         self.quality_analyzer = QueryQualityAnalyzer()
         self.execution_preview = ExecutionPreviewService()
         self.llm = llm or self._provider()
+        self.llm_context_limit = llm_context_limit if llm_context_limit is not None else settings.llm_context_limit
+        self.llm_context_excerpt_chars = (
+            llm_context_excerpt_chars
+            if llm_context_excerpt_chars is not None
+            else settings.llm_context_excerpt_chars
+        )
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
         payload = self._with_business_aliases(payload)
@@ -118,6 +130,7 @@ class QueryGenerator:
                 "llm_status": llm_data.get("status"),
                 "llm_error_type": llm_data.get("error_type"),
                 "llm_retry_count": llm_data.get("retry_count", 0),
+                "llm_timing": self._llm_timing(llm_data),
                 "llm_used": bool(llm_query) and not used_template_fallback,
                 "template_fallback": used_template_fallback,
                 "repair_attempts": repair_attempts,
@@ -552,19 +565,36 @@ class QueryGenerator:
         }
         return json.dumps(body, ensure_ascii=False, indent=2)
 
-    @staticmethod
-    def _llm_context(results) -> list[dict[str, object]]:
+    def _llm_context(self, results) -> list[dict[str, object]]:
         return [
             {
                 "entry_name": result.entry_name,
                 "section": result.section,
                 "content_type": result.content_type,
-                "excerpt": result.excerpt[:settings.llm_context_excerpt_chars],
+                "excerpt": result.excerpt[:self.llm_context_excerpt_chars],
                 "options": result.options,
                 "functions": result.functions,
             }
-            for result in results[:settings.llm_context_limit]
+            for result in results[:self.llm_context_limit]
         ]
+
+    @staticmethod
+    def _llm_timing(data: dict) -> dict[str, int]:
+        timing = data.get("timing")
+        if not isinstance(timing, dict):
+            return {}
+        allowed = {
+            "client_duration_ms",
+            "total_duration_ms",
+            "load_duration_ms",
+            "prompt_eval_duration_ms",
+            "eval_duration_ms",
+        }
+        return {
+            key: value
+            for key, value in timing.items()
+            if key in allowed and isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        }
 
     def _intent_resolution_prompt(self, payload: GenerateQueryRequest, intent: QueryIntent, results) -> str:
         body = {

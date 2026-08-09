@@ -13,7 +13,7 @@ from app.services.feedback_store import FeedbackStore
 from app.services.alias_store import AliasImportError, AliasStore
 from app.services.audit_store import AuditStore
 from app.services.generation_comparison import append_comparison_history, comparison_history_rows, compare_generation_results
-from app.services.gold_set import run_gold_set
+from app.services.gold_set import compare_llm_context_limits, run_gold_set
 from app.services.session_hints import merge_hints, remove_hint
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.indexer import DocumentIndex
@@ -388,6 +388,22 @@ with st.sidebar:
                     st.dataframe(failures, use_container_width=True, hide_index=True)
                 else:
                     st.success("모든 Gold Set 시나리오를 통과했습니다.")
+            if settings.llm_provider == "ollama":
+                if st.button("Ollama 문맥 제한 비교"):
+                    st.session_state["ollama_context_comparison"] = compare_llm_context_limits(
+                        settings.db_path,
+                        settings.docs_dir.parent / "tests" / "fixtures" / "gold_set.json",
+                        QueryGenerator(Retriever(index)).llm,
+                    )
+                if result := st.session_state.get("ollama_context_comparison"):
+                    st.dataframe(
+                        [
+                            {"문맥": name, **summary}
+                            for name, summary in result.items()
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
 st.title("로그프레소 자연어 쿼리 생성기")
 

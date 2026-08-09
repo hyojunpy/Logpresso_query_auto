@@ -16,7 +16,16 @@ def metric_label(metric: str) -> str:
         return labels[metric]
     if metric.startswith("http_status_"):
         return f"HTTP {metric.removeprefix('http_status_')} 응답"
+    if metric.startswith("ollama_"):
+        return f"Ollama {metric.removeprefix('ollama_').replace('_', ' ')}"
     return metric
+
+
+def duration_bucket_metric(name: str, milliseconds: int) -> str:
+    for threshold in (250, 1_000, 5_000, 15_000, 45_000):
+        if milliseconds < threshold:
+            return f"{name}_lt_{threshold}ms"
+    return f"{name}_gte_45000ms"
 
 
 class MetricsStore:
