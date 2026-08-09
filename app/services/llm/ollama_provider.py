@@ -53,7 +53,7 @@ class OllamaProvider(LLMProvider):
                     data["retry_count"] = attempt
                     return data
             except TimeoutError:
-                error = {"status": "error", "error_type": "timeout", "message": "Ollama request timed out"}
+                return {"status": "error", "error_type": "timeout", "message": "Ollama request timed out", "retry_count": attempt}
             except HTTPError as exc:
                 error = {"status": "error", "error_type": "http_error", "message": f"Ollama returned HTTP {exc.code}"}
                 if exc.code < 500:
@@ -61,6 +61,8 @@ class OllamaProvider(LLMProvider):
             except URLError as exc:
                 error_type = "timeout" if isinstance(exc.reason, TimeoutError) else "connection_error"
                 error = {"status": "error", "error_type": error_type, "message": "Ollama connection failed"}
+                if error_type == "timeout":
+                    return {**error, "retry_count": attempt}
             except (json.JSONDecodeError, ValueError, TypeError):
                 return {"status": "error", "error_type": "invalid_response", "message": "Ollama returned an invalid response"}
             if attempt == 1:

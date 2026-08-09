@@ -52,6 +52,17 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(data["query"], "table logs")
         self.assertEqual(data["retry_count"], 1)
 
+    def test_ollama_provider_does_not_retry_a_timeout(self):
+        with patch(
+            "app.services.llm.ollama_provider.request.urlopen",
+            side_effect=TimeoutError,
+        ) as urlopen:
+            data = OllamaProvider().generate_json("prompt", [])
+
+        self.assertEqual(data["error_type"], "timeout")
+        self.assertEqual(data["retry_count"], 0)
+        urlopen.assert_called_once()
+
     def test_openai_timeout_returns_safe_error_without_api_key(self):
         with patch("app.services.llm.openai_provider.settings.openai_api_key", "super-secret-key"):
             with patch("app.services.llm.openai_provider.request.urlopen", side_effect=TimeoutError):

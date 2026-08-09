@@ -86,3 +86,9 @@ optional `MANAGEMENT_API_KEY` guard as other management APIs.
 Counters are stored separately in `data/metrics.db` and are automatically
 purged after 30 days. Set `METRICS_RETENTION_DAYS` to adjust the period; use a
 positive integer only.
+
+## Ollama Response Budget
+
+The default Ollama request timeout is 45 seconds. A timeout is not retried;
+the application returns the locally validated rule-based draft instead. Set
+`OLLAMA_TIMEOUT_SECONDS` only when a larger local model requires more time.
