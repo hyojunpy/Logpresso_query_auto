@@ -13,6 +13,11 @@ class StreamlitBrowserTest(unittest.TestCase):
     def setUpClass(cls):
         cls.root = Path(__file__).resolve().parents[1]
         cls.port = 18502
+        # A fresh CI checkout has no runtime index; prepare the reference data
+        # that this browser flow needs before starting the UI.
+        from app.services.indexer import DocumentIndex
+
+        DocumentIndex(cls.root / "data" / "app.db").rebuild(cls.root / "docs" / "로그프레소 쿼리.docx")
         cls.process = subprocess.Popen(
             [sys.executable, "-m", "streamlit", "run", "ui/streamlit_app.py", "--server.address", "127.0.0.1", "--server.port", str(cls.port), "--server.headless", "true"],
             cwd=cls.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
