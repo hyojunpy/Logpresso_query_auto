@@ -3,6 +3,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 import json
 
+from app.core.config import settings
 from app.services.llm.json_utils import parse_json_object
 from app.services.llm.mock_provider import MockProvider
 from app.services.llm.openai_provider import OpenAIProvider
@@ -50,6 +51,16 @@ class LLMProviderTest(unittest.TestCase):
         self.assertEqual(data["query"], "table logs")
         self.assertEqual(data["timing"]["total_duration_ms"], 2)
         self.assertEqual(data["timing"]["load_duration_ms"], 1)
+
+    def test_ollama_provider_sends_configured_context_window(self):
+        payload = {"response": '{"status":"generated","query":"table logs"}'}
+        with patch.object(settings, "ollama_num_ctx", 2048), patch(
+            "app.services.llm.ollama_provider.request.urlopen", return_value=FakeResponse(payload)
+        ) as urlopen:
+            OllamaProvider().generate_json("prompt", [])
+
+        body = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["options"]["num_ctx"], 2048)
 
     def test_ollama_provider_retries_temporary_connection_failure_once(self):
         payload = {"response": '{"status":"generated","query":"table logs"}'}

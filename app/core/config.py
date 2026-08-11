@@ -31,6 +31,7 @@ class Settings:
     llm_context_excerpt_chars: int = max(100, int(os.getenv("LLM_CONTEXT_EXCERPT_CHARS", "600")))
     # Keep local-model output short enough for interactive query drafting.
     ollama_num_predict: int = max(1, int(os.getenv("OLLAMA_NUM_PREDICT", "96")))
+    ollama_num_ctx: int = max(1_024, int(os.getenv("OLLAMA_NUM_CTX", "4096")))
     enable_llm_intent_fallback: bool = os.getenv("ENABLE_LLM_INTENT_FALLBACK", "true").lower() in {"1", "true", "yes"}
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}

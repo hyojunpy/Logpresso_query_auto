@@ -37,6 +37,7 @@ class OllamaProvider(LLMProvider):
                 "options": {
                     "temperature": 0,
                     "num_predict": settings.ollama_num_predict,
+                    "num_ctx": settings.ollama_num_ctx,
                 },
             }
         ).encode("utf-8")

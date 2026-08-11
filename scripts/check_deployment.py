@@ -54,6 +54,7 @@ def _check_llm_limits(config: Any, errors: list[str], checks: dict[str, object])
     limits = {
         "ollama_timeout_seconds": (getattr(config, "ollama_timeout_seconds", 45), 1, 300),
         "ollama_num_predict": (getattr(config, "ollama_num_predict", 96), 16, 2_048),
+        "ollama_num_ctx": (getattr(config, "ollama_num_ctx", 4_096), 1_024, 32_768),
         "llm_context_limit": (getattr(config, "llm_context_limit", 4), 1, 32),
         "llm_context_excerpt_chars": (getattr(config, "llm_context_excerpt_chars", 600), 100, 10_000),
     }

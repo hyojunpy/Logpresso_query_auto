@@ -41,9 +41,9 @@ def test_preflight_rejects_out_of_range_llm_context_settings(tmp_path: Path):
     config = SimpleNamespace(
         doc_path=tmp_path / "missing.docx", db_path=tmp_path / "app.db", catalog_path=tmp_path / "catalog.json",
         llm_provider="ollama", openai_api_key=None, cors_allowed_origins=(), management_api_key=None,
-        ollama_timeout_seconds=0, ollama_num_predict=4, llm_context_limit=0, llm_context_excerpt_chars=99,
+        ollama_timeout_seconds=0, ollama_num_predict=4, ollama_num_ctx=512, llm_context_limit=0, llm_context_excerpt_chars=99,
     )
 
     result = run_checks(config)
 
-    assert {"ollama_timeout_seconds_out_of_range", "ollama_num_predict_out_of_range", "llm_context_limit_out_of_range", "llm_context_excerpt_chars_out_of_range"}.issubset(result["errors"])
+    assert {"ollama_timeout_seconds_out_of_range", "ollama_num_predict_out_of_range", "ollama_num_ctx_out_of_range", "llm_context_limit_out_of_range", "llm_context_excerpt_chars_out_of_range"}.issubset(result["errors"])
