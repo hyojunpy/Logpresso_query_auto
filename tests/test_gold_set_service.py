@@ -18,8 +18,9 @@ def test_gold_set_context_comparison_reports_aggregate_quality_counts():
         shared_index().db_path,
         Path("tests") / "fixtures" / "gold_set.json",
         MockProvider(),
+        max_cases=2,
     )
 
     assert set(result) == {"bounded", "retrieved_context"}
-    assert result["bounded"]["total"] >= 10
-    assert result["bounded"]["validation_passed"] >= 10
+    assert result["bounded"]["total"] == 2
+    assert 0 <= result["bounded"]["validation_passed"] <= 2

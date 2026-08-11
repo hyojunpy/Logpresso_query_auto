@@ -389,11 +389,19 @@ with st.sidebar:
                 else:
                     st.success("모든 Gold Set 시나리오를 통과했습니다.")
             if settings.llm_provider == "ollama":
+                comparison_case_limit = st.number_input(
+                    "문맥 비교 케이스 수",
+                    min_value=1,
+                    max_value=19,
+                    value=3,
+                    step=1,
+                )
                 if st.button("Ollama 문맥 제한 비교"):
                     st.session_state["ollama_context_comparison"] = compare_llm_context_limits(
                         settings.db_path,
                         settings.docs_dir.parent / "tests" / "fixtures" / "gold_set.json",
                         QueryGenerator(Retriever(index)).llm,
+                        max_cases=int(comparison_case_limit),
                     )
                 if result := st.session_state.get("ollama_context_comparison"):
                     st.dataframe(

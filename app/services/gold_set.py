@@ -16,9 +16,12 @@ def run_gold_set(
     llm: LLMProvider | None = None,
     llm_context_limit: int | None = None,
     llm_context_excerpt_chars: int | None = None,
+    max_cases: int | None = None,
 ) -> dict[str, object]:
     """Run fixture-only semantic evaluation. No customer system is contacted."""
     cases = json.loads(fixture_path.read_text(encoding="utf-8"))
+    if max_cases is not None:
+        cases = cases[:max(1, max_cases)]
     generator = QueryGenerator(
         Retriever(DocumentIndex(db_path)),
         llm=llm,
@@ -55,17 +58,23 @@ def run_gold_set(
     return {"total": len(results), "passed": sum(item["passed"] for item in results), "failed": sum(not item["passed"] for item in results), "results": results}
 
 
-def compare_llm_context_limits(db_path: Path, fixture_path: Path, llm: LLMProvider) -> dict[str, dict[str, int]]:
+def compare_llm_context_limits(
+    db_path: Path,
+    fixture_path: Path,
+    llm: LLMProvider,
+    max_cases: int | None = None,
+) -> dict[str, dict[str, int]]:
     """Compare bounded and retrieved-context generation using only fixture cases."""
     from app.core.config import settings
 
-    bounded = run_gold_set(db_path, fixture_path, llm=llm)
+    bounded = run_gold_set(db_path, fixture_path, llm=llm, max_cases=max_cases)
     retrieved_context = run_gold_set(
         db_path,
         fixture_path,
         llm=llm,
         llm_context_limit=settings.retrieval_limit,
         llm_context_excerpt_chars=1_000_000,
+        max_cases=max_cases,
     )
     return {
         "bounded": _evaluation_summary(bounded),
