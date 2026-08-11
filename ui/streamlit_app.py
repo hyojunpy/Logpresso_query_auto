@@ -26,7 +26,7 @@ from app.services.retriever import Retriever
 from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
 from app.services.ollama_status import check_ollama
-from app.services.metrics_store import MetricsStore, metric_label
+from app.services.metrics_store import MetricsStore, metric_label, operational_overview
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -348,9 +348,17 @@ with st.sidebar:
         metrics_store = MetricsStore(settings.metrics_db_path, settings.metrics_retention_days)
         metrics = metrics_store.summary()
         if metrics:
+            overview = operational_overview(metrics)
             st.caption(
                 f"최근 {settings.metrics_retention_days}일 집계입니다. 요청·쿼리·IP 원문은 저장하지 않습니다."
             )
+            generation_col, fallback_col, ollama_col, slow_col = st.columns(4)
+            generation_col.metric("생성 요청", overview["generation_total"])
+            fallback_col.metric("LLM fallback", overview["fallback_count"])
+            ollama_col.metric("Ollama 응답", overview["ollama_requests"])
+            slow_col.metric("Timeout 구간", overview["slow_ollama_count"])
+            for warning in overview["warnings"]:
+                st.warning(warning)
             st.dataframe(
                 [
                     {"항목": metric_label(key), "카운터": key, "횟수": value}

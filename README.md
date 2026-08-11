@@ -104,6 +104,7 @@ OLLAMA_NUM_PREDICT=96
 OLLAMA_NUM_CTX=4096
 LLM_CONTEXT_LIMIT=4
 LLM_CONTEXT_EXCERPT_CHARS=600
+METRICS_RETENTION_DAYS=30
 RETRIEVAL_LIMIT=8
 LOG_LEVEL=INFO
 CORS_ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
@@ -127,6 +128,18 @@ Ollama 응답 속도 조정:
 - `LLM_CONTEXT_EXCERPT_CHARS`: 근거 문서별 전달할 최대 문자 수입니다. 기본값은 `600`입니다.
 
 검색 근거는 LLM 프롬프트에만 축소 적용됩니다. 최종 생성 쿼리의 문서 근거 검증 정책은 유지됩니다.
+
+로컬 CPU에서 `llama3.2:3b`를 사용할 때는 아래 조합부터 시작하는 것을 권장합니다.
+
+```env
+OLLAMA_TIMEOUT_SECONDS=45
+OLLAMA_NUM_PREDICT=64
+OLLAMA_NUM_CTX=4096
+LLM_CONTEXT_LIMIT=4
+LLM_CONTEXT_EXCERPT_CHARS=600
+```
+
+`OLLAMA_NUM_PREDICT`를 더 낮추면 응답은 빨라질 수 있지만 긴 쿼리 JSON이 잘릴 수 있습니다. `scripts/check_deployment.py`는 시간 제한, 출력 토큰, 컨텍스트 창, 문서 근거 설정 범위를 외부 호출 없이 검사합니다.
 
 ## 문서 인덱싱
 
@@ -314,6 +327,7 @@ $env:RUN_BROWSER_TESTS = "1"
 - 이 애플리케이션은 Logpresso, DB, FTP, SFTP 등에 실제로 연결하거나 쿼리를 실행하지 않습니다.
 - API 인증 체계는 아직 제공하지 않습니다. 카탈로그 관리 API를 외부에 노출하기 전 인증 및 권한 제어를 추가해야 합니다.
 - 간단한 공유 환경에서는 `MANAGEMENT_API_KEY`를 설정하고 관리 API 요청에 `X-Management-API-Key` 헤더를 전달할 수 있습니다. 고객사 IdP 또는 리버스 프록시의 역할 기반 접근 제어를 대체하지는 않습니다.
+- 비로컬 `CORS_ALLOWED_ORIGINS`를 설정한 배포는 `MANAGEMENT_API_KEY`가 없으면 배포 전 점검이 실패합니다.
 - 피드백 저장소는 기본적으로 원문 요청과 생성 쿼리를 저장하지 않습니다.
 - `docs/로그프레소 쿼리.docx`의 공개 및 재배포 권한은 별도로 확인해야 합니다.
 

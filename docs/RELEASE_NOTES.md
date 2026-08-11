@@ -1,6 +1,18 @@
 # Release Notes
 
-## Unreleased
+## 0.1.1 - 2026-08-11
+
+- Bounded Ollama retrieval context, output budget, and request context window
+  to improve local-model responsiveness.
+- Added privacy-safe Ollama timing buckets, operational warnings, and a
+  bounded development smoke evaluation for context-quality checks.
+- Classified malformed Ollama output as a fallback condition and kept timeout
+  handling retry-free.
+- Made Compose pass the same Ollama and metrics settings as local deployment.
+- Require a management key during deployment preflight when non-local CORS is
+  configured.
+
+## Previous Unreleased Work
 
 - Added catalog CSV import/export support for node, namespace, table
   description, and nullable metadata.

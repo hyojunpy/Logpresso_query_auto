@@ -65,11 +65,18 @@ table_name,field_name,field_type,description
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2:3b
+OLLAMA_TIMEOUT_SECONDS=45
+OLLAMA_NUM_PREDICT=64
+OLLAMA_NUM_CTX=4096
 ```
 
 UI 기본 모드는 빠른 규칙 기반 생성입니다. Ollama 보조 모드는 애매한 요청을
 보완할 수 있지만, 결과는 항상 로컬 검증을 거치며 실제 실행으로 이어지지
 않습니다.
+
+`llama3.2:3b`를 CPU에서 구동할 때는 위 설정부터 적용합니다. 응답이 느리면
+`OLLAMA_NUM_PREDICT`를 낮추기 전에 긴 쿼리 JSON이 잘리지 않는지 개발용 Gold
+Set smoke 평가로 확인하세요.
 
 ## 점검 명령
 
@@ -115,6 +122,8 @@ LLM 호출을 수행하지 않습니다.
 - 간단한 내부 공유 환경에서는 `MANAGEMENT_API_KEY`를 비밀 저장소에서 주입하고
   `X-Management-API-Key` 헤더를 관리 도구에만 전달합니다. 키는 정기 교체하고
   교체 시 API와 UI 컨테이너를 함께 재시작합니다.
+- 비로컬 `CORS_ALLOWED_ORIGINS`를 허용하면 `MANAGEMENT_API_KEY` 누락은 배포 전
+  점검 오류입니다. IdP 또는 리버스 프록시 역할 제어는 별도로 유지합니다.
 - `/api/v1/health`와 `/api/v1/ready`를 모니터링에 등록합니다. `/ready` 실패는
   문서 배치 또는 재인덱싱 문제를 우선 확인합니다.
 - `data/`는 백업하되, 카탈로그·피드백·감사 메타데이터만 포함하도록 접근 권한을

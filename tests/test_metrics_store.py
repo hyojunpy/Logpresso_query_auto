@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from app.services.metrics_store import MetricsStore, duration_bucket_metric, metric_label
+from app.services.metrics_store import MetricsStore, duration_bucket_metric, metric_label, operational_overview
 
 
 def test_metrics_store_keeps_aggregate_counters_only(tmp_path):
@@ -28,6 +28,21 @@ def test_metric_labels_are_human_readable_for_known_counters():
 def test_duration_metrics_use_bounded_buckets_without_raw_values():
     assert duration_bucket_metric("ollama_total_duration_ms", 1_200) == "ollama_total_duration_ms_lt_5000ms"
     assert duration_bucket_metric("ollama_total_duration_ms", 50_000) == "ollama_total_duration_ms_gte_45000ms"
+
+
+def test_operational_overview_uses_aggregate_counts_and_warns_on_slow_fallbacks():
+    overview = operational_overview({
+        "generation_generated": 3,
+        "generation_needs_clarification": 1,
+        "generation_llm_fallback": 2,
+        "ollama_client_duration_ms_lt_5000ms": 2,
+        "ollama_client_duration_ms_gte_45000ms": 1,
+    })
+
+    assert overview["generation_total"] == 4
+    assert overview["ollama_requests"] == 3
+    assert overview["slow_ollama_count"] == 1
+    assert len(overview["warnings"]) == 2
 
 
 def test_metrics_store_returns_bounded_daily_summary(tmp_path):

@@ -28,6 +28,28 @@ def duration_bucket_metric(name: str, milliseconds: int) -> str:
     return f"{name}_gte_45000ms"
 
 
+def operational_overview(metrics: dict[str, int]) -> dict[str, int | list[str]]:
+    """Summarize aggregate operational counters without exposing any request content."""
+    generation_total = sum(
+        count for metric, count in metrics.items() if metric.startswith("generation_") and metric != "generation_llm_fallback"
+    )
+    fallback_count = metrics.get("generation_llm_fallback", 0)
+    ollama_requests = sum(count for metric, count in metrics.items() if metric.startswith("ollama_client_duration_ms_"))
+    slow_ollama_count = metrics.get("ollama_client_duration_ms_gte_45000ms", 0)
+    warnings: list[str] = []
+    if slow_ollama_count:
+        warnings.append("Ollama 응답이 timeout 구간에 도달한 요청이 있습니다.")
+    if fallback_count:
+        warnings.append("규칙 기반 fallback이 발생한 요청이 있습니다.")
+    return {
+        "generation_total": generation_total,
+        "fallback_count": fallback_count,
+        "ollama_requests": ollama_requests,
+        "slow_ollama_count": slow_ollama_count,
+        "warnings": warnings,
+    }
+
+
 class MetricsStore:
     """Stores aggregate counters only; never records request, query, or IP data."""
     def __init__(self, db_path: Path, retention_days: int = 30):

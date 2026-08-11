@@ -45,7 +45,7 @@ def run_checks(config: Any) -> dict[str, object]:
     public_origins = [origin for origin in config.cors_allowed_origins if not origin.startswith("http://localhost") and not origin.startswith("http://127.0.0.1")]
     checks["cors_allowed_origins"] = list(config.cors_allowed_origins)
     if public_origins and not config.management_api_key:
-        warnings.append("management_api_key_not_configured_for_nonlocal_cors")
+        errors.append("management_api_key_required_for_nonlocal_cors")
     checks["management_api_key_configured"] = bool(config.management_api_key)
     return {"status": "failed" if errors else "passed", "errors": errors, "warnings": warnings, "checks": checks}
 

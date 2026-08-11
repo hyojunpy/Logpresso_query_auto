@@ -47,3 +47,14 @@ def test_preflight_rejects_out_of_range_llm_context_settings(tmp_path: Path):
     result = run_checks(config)
 
     assert {"ollama_timeout_seconds_out_of_range", "ollama_num_predict_out_of_range", "ollama_num_ctx_out_of_range", "llm_context_limit_out_of_range", "llm_context_excerpt_chars_out_of_range"}.issubset(result["errors"])
+
+
+def test_preflight_rejects_nonlocal_cors_without_management_key(tmp_path: Path):
+    config = SimpleNamespace(
+        doc_path=tmp_path / "missing.docx", db_path=tmp_path / "app.db", catalog_path=tmp_path / "catalog.json",
+        llm_provider="mock", openai_api_key=None, cors_allowed_origins=("https://query.example.com",), management_api_key=None,
+    )
+
+    result = run_checks(config)
+
+    assert "management_api_key_required_for_nonlocal_cors" in result["errors"]

@@ -87,8 +87,27 @@ Counters are stored separately in `data/metrics.db` and are automatically
 purged after 30 days. Set `METRICS_RETENTION_DAYS` to adjust the period; use a
 positive integer only.
 
+The UI summarizes aggregate generation count, fallback count, Ollama response
+count, and timeout-bucket count. A fallback or a timeout-bucket count is an
+operational warning; inspect model capacity and configuration without storing
+or exporting request, query, IP, or model-response text.
+
 ## Ollama Response Budget
 
 The default Ollama request timeout is 45 seconds. A timeout is not retried;
 the application returns the locally validated rule-based draft instead. Set
 `OLLAMA_TIMEOUT_SECONDS` only when a larger local model requires more time.
+
+For a CPU-hosted `llama3.2:3b`, begin with `OLLAMA_NUM_PREDICT=64` and
+`OLLAMA_NUM_CTX=4096`. The latter avoids the model's much larger default
+context window when the application sends a bounded retrieval prompt. Keep
+`LLM_CONTEXT_LIMIT=4` and `LLM_CONTEXT_EXCERPT_CHARS=600` unless evaluation
+shows a quality regression. Run the protected development smoke evaluation
+with one case first; increase its case count only for an intentional longer
+evaluation.
+
+## Shared Deployment Gate
+
+When `CORS_ALLOWED_ORIGINS` contains a non-local origin, deployment preflight
+requires `MANAGEMENT_API_KEY`. Use an upstream IdP or reverse proxy for full
+role-based access control; the key remains a small-deployment guard only.
