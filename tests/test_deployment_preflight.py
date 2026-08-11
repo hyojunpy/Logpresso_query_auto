@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from docx import Document
 
 from app.services.indexer import DocumentIndex
+import scripts.check_deployment as deployment_preflight
 from scripts.check_deployment import run_checks
 
 
@@ -58,3 +59,15 @@ def test_preflight_rejects_nonlocal_cors_without_management_key(tmp_path: Path):
     result = run_checks(config)
 
     assert "management_api_key_required_for_nonlocal_cors" in result["errors"]
+
+
+def test_preflight_main_emits_ascii_safe_json_for_non_ascii_document_path(tmp_path: Path, monkeypatch, capsys):
+    config = SimpleNamespace(
+        doc_path=tmp_path / "로그프레소.docx", db_path=tmp_path / "app.db", catalog_path=tmp_path / "catalog.json",
+        llm_provider="mock", openai_api_key=None, cors_allowed_origins=(), management_api_key=None,
+    )
+    monkeypatch.setattr(deployment_preflight, "settings", config)
+
+    deployment_preflight.main()
+
+    capsys.readouterr().out.encode("ascii")

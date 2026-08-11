@@ -66,7 +66,8 @@ def _check_llm_limits(config: Any, errors: list[str], checks: dict[str, object])
 
 def main() -> int:
     result = run_checks(settings)
-    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    # Keep Windows CI logs portable when the configured document path is non-ASCII.
+    print(json.dumps(result, ensure_ascii=True, indent=2, default=str))
     return 1 if result["errors"] else 0
 
 
