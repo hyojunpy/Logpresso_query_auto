@@ -14,12 +14,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Verify documentation publication approval
+      - name: Verify internal documentation distribution approval
         env:
-          DOCS_PUBLICATION_APPROVED: ${{ vars.DOCS_PUBLICATION_APPROVED }}
+          DOCS_INTERNAL_DISTRIBUTION_APPROVED: ${{ vars.DOCS_INTERNAL_DISTRIBUTION_APPROVED }}
         run: |
-          if [ "$DOCS_PUBLICATION_APPROVED" != "true" ]; then
-            echo "::error::Set DOCS_PUBLICATION_APPROVED=true after confirming redistribution rights for the bundled DOCX manual."
+          if [ "$DOCS_INTERNAL_DISTRIBUTION_APPROVED" != "true" ]; then
+            echo "::error::Set DOCS_INTERNAL_DISTRIBUTION_APPROVED=true after recording approval for private-repository collaborator sharing of the bundled DOCX manual."
             exit 1
           fi
 
