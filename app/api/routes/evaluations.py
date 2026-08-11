@@ -17,7 +17,7 @@ def run_gold_set():
 
 
 @router.post("/gold-set/ollama-context", dependencies=[Depends(require_management_access)])
-def compare_ollama_context_limits(case_limit: int = Query(3, ge=1, le=100)):
+def compare_ollama_context_limits(case_limit: int = Query(1, ge=1, le=100)):
     """Explicit development evaluation. It calls only the configured local Ollama provider."""
     if not settings.enable_dev_evaluation:
         raise HTTPException(status_code=404, detail="Development evaluation is disabled.")

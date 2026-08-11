@@ -393,7 +393,7 @@ with st.sidebar:
                     "문맥 비교 케이스 수",
                     min_value=1,
                     max_value=19,
-                    value=3,
+                    value=1,
                     step=1,
                 )
                 if st.button("Ollama 문맥 제한 비교"):
