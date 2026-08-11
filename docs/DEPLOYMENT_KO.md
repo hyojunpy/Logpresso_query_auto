@@ -95,11 +95,13 @@ docker compose up --build
 운영 카탈로그와 분리된 검증이 필요하면 별도 폴더를 지정합니다.
 
 ```powershell
+$env:COMPOSE_PROJECT_NAME = 'logpresso-release-check'
 $env:LOGPRESSO_DATA_DIR = '.docker-test-data'
 docker compose up --build
 ```
 
 이 경우 `data/`의 카탈로그·피드백·감사 데이터는 변경되지 않습니다.
+`COMPOSE_PROJECT_NAME`도 별도로 지정하면 기존 Compose 컨테이너와 이름이 충돌하지 않습니다.
 
 컨테이너는 API `8000`, UI `8501` 포트를 사용하며 두 서비스 모두 healthcheck를
 가집니다.

@@ -16,8 +16,8 @@ Complete every item before creating a `v*` tag.
 - [ ] Confirm the release notes include the intended version and date.
 - [ ] Run `python -m pytest`.
 - [ ] Run `docker compose config --quiet`.
-- [ ] In PowerShell, set `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks.
-- [ ] Stop the release-check stack with the same `LOGPRESSO_DATA_DIR` value and remove only `.docker-release-check`.
+- [ ] In PowerShell, set `$env:COMPOSE_PROJECT_NAME = 'logpresso-release-check'` and `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks.
+- [ ] Stop the release-check stack with the same `COMPOSE_PROJECT_NAME` and `LOGPRESSO_DATA_DIR` values, then remove only `.docker-release-check`.
 - [ ] Confirm the `main` branch CI and CodeQL workflows pass.
 - [ ] For Ollama-enabled release environments, run the one-case Gold Set smoke evaluation and review aggregate fallback/timeout counters.
 
