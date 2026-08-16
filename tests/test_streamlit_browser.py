@@ -18,9 +18,19 @@ class StreamlitBrowserTest(unittest.TestCase):
         from app.services.indexer import DocumentIndex
 
         DocumentIndex(cls.root / "data" / "app.db").rebuild(cls.root / "docs" / "로그프레소 쿼리.docx")
+        process_env = os.environ.copy()
+        process_env.update(
+            {
+                "LLM_PROVIDER": "mock",
+                "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
+            }
+        )
         cls.process = subprocess.Popen(
             [sys.executable, "-m", "streamlit", "run", "ui/streamlit_app.py", "--server.address", "127.0.0.1", "--server.port", str(cls.port), "--server.headless", "true"],
-            cwd=cls.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=cls.root,
+            env=process_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         for _ in range(60):
             try:
