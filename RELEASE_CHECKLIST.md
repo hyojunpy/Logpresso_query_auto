@@ -18,14 +18,14 @@ Complete every item before creating a `v*` tag.
 - [x] Run `docker compose config --quiet`.
 - [x] In PowerShell, set `$env:COMPOSE_PROJECT_NAME = 'logpresso-release-check'` and `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks.
 - [x] Stop the release-check stack with the same `COMPOSE_PROJECT_NAME` and `LOGPRESSO_DATA_DIR` values, then remove only `.docker-release-check`.
-- [ ] Confirm the `main` branch CI passes. CodeQL is disabled while this private repository does not have Code Scanning available.
+- [x] Confirm the `main` branch CI passes. CI #94 and Release #2 passed for `v0.1.2`. CodeQL is disabled while this private repository does not have Code Scanning available.
 - [x] For Ollama-enabled release environments, run the one-case Gold Set smoke evaluation and review aggregate fallback/timeout counters.
 
 ## Publish
 
 ```powershell
-git tag v0.1.1
-git push origin v0.1.1
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
 The tag workflow reruns the test suite before creating the GitHub Release.

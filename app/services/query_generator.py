@@ -133,6 +133,8 @@ class QueryGenerator:
                 "llm_timing": self._llm_timing(llm_data),
                 "llm_used": bool(llm_query) and not used_template_fallback,
                 "template_fallback": used_template_fallback,
+                "llm_candidate_valid": bool(llm_query) and not used_template_fallback and validation.valid,
+                "fallback_reason": "llm_candidate_failed_validation" if used_template_fallback else llm_data.get("error_type"),
                 "repair_attempts": repair_attempts,
             },
         )

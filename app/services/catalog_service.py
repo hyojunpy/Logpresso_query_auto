@@ -207,7 +207,10 @@ class CatalogService:
             aliases[target] = aliases.get(source, origins.get(source, set()))
             lineage.append(FieldLineage(output_field=target, input_fields=[source], operation="rename", source_table=source_table(source)))
         for target, expression in re.findall(r"\beval\s+([A-Za-z_][\w]*)\s*=\s*([^\n|]+)", query, flags=re.IGNORECASE):
-            inputs = re.findall(r"\b[A-Za-z_][\w]*\b", expression)
+            identifiers = re.findall(r"\b[A-Za-z_][\w]*\b", expression)
+            functions = set(re.findall(r"\b([A-Za-z_][\w]*)\s*\(", expression))
+            quoted = set(re.findall(r"['\"]([A-Za-z_][\w]*)['\"]", expression))
+            inputs = list(dict.fromkeys(field for field in identifiers if field not in functions and field not in quoted))
             input_sources = set().union(*(aliases.get(field, origins.get(field, set())) for field in inputs)) if inputs else set()
             aliases[target] = input_sources
             lineage.append(FieldLineage(output_field=target, input_fields=inputs, operation="eval", source_table=next(iter(input_sources)) if len(input_sources) == 1 else None))
