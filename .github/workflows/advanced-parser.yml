@@ -1,0 +1,28 @@
+name: Advanced parser roadmap
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  roadmap-tests:
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -c requirements.lock -e ".[dev]"
+      - name: Run roadmap suite
+        env:
+          LLM_PROVIDER: mock
+        run: python -m pytest -m advanced_parser --tb=short

@@ -63,9 +63,18 @@ class QueryIntent(BaseModel):
     tables: list[str] = []
     table_candidates: list[str] = []
     loggers: list[str] = []
+    logger_window: str | None = None
     streams: list[str] = []
+    stream_window: str | None = None
     forward_streams: list[str] = []
     fulltext_expression: str | None = None
+    parser_name: str | None = None
+    structured_parser: Literal["parsejson", "parsecsv"] | None = None
+    structured_parser_field: str | None = None
+    parser_flatten: bool = False
+    parser_tab: bool = False
+    explode_fields: list[str] = []
+    source_order: Literal["asc", "desc"] | None = None
     time_range: TimeRange | None = None
     use_parameterized_time_range: bool = False
     filters: list[FilterCondition] = []
@@ -80,6 +89,7 @@ class QueryIntent(BaseModel):
     final_aggregations: list[Aggregation] = []
     sort: list[SortCondition] = []
     limit: int | None = None
+    offset: int | None = None
     output_format: str | None = None
     assumptions: list[str] = []
     missing_information: list[str] = []

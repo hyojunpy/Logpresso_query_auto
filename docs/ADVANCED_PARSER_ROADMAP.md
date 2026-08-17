@@ -34,6 +34,22 @@ compound boolean expressions, source options, and UI wording. File-source
 implementation remains deferred until the upload security entry criteria are
 met; it must not be enabled merely to make roadmap tests pass.
 
+## 0.1.3 Work Breakdown
+
+- Product-track: compound boolean grouping, quoted fulltext expressions,
+  command-specific parser options, offset/sort handling, and field lineage.
+- Security-gated: every direct file source, archive member, upload, retention,
+  and deletion behavior. These remain excluded until a written threat model,
+  scanning policy, size/type limits, retention period, and audit behavior are
+approved.
+- Reporting-only: the exploratory suite runs in CI as a non-blocking job and
+  publishes its result so regressions are visible without pretending the
+  security-gated cases are supported.
+
+The initial 0.1.3 implementation raises the roadmap baseline to 76 passing and
+16 failing tests. The remaining failures are dominated by security-gated file
+sources; the residual non-file cases are tracked separately from that gate.
+
 ## Entry Criteria
 
 Each increment needs documented syntax evidence, fixtures without customer log

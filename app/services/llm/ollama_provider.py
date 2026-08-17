@@ -33,6 +33,7 @@ class OllamaProvider(LLMProvider):
                 "model": settings.ollama_model,
                 "prompt": prompt,
                 "stream": False,
+                "keep_alive": "5m",
                 "format": response_format,
                 "options": {
                     "temperature": 0,

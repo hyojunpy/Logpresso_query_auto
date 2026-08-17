@@ -544,7 +544,10 @@ def render_validation_result(title: str, result: dict) -> None:
     warnings = result.get("warnings", [])
     is_valid = result.get("valid", False)
     st.subheader(title)
-    (st.success if is_valid else st.error)("통과" if is_valid else f"오류 {len(errors)}건")
+    (st.success if is_valid else st.error)("문법 검증을 통과했습니다." if is_valid else f"오류 {len(errors)}건")
+    commands = result.get("commands", [])
+    if commands:
+        st.markdown("사용 명령: " + ", ".join(f"`{command}`" for command in commands))
     error_column, warning_column, command_column = st.columns(3)
     error_column.metric("오류", len(errors))
     warning_column.metric("경고", len(warnings))
@@ -693,6 +696,13 @@ if response:
                 st.write(f"- {question}")
         elif response.get("query"):
             st.code(response["query"], language="sql")
+            st.caption("코드 블록의 복사 아이콘을 사용하거나 아래에서 파일로 저장할 수 있습니다.")
+            st.download_button(
+                "쿼리 파일 다운로드",
+                data=response["query"],
+                file_name="logpresso-query.txt",
+                mime="text/plain",
+            )
             if notice := st.session_state.pop("suggestion_applied_notice", None):
                 st.info(f"'{notice}' 제안을 편집 쿼리에 반영했습니다. 재검증 후 검토하세요.")
             with st.expander("규칙 기반과 Ollama 결과 비교"):
@@ -819,12 +829,6 @@ if response:
     with tabs[6]:
         st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
 
-    st.download_button(
-        "진단 리포트 다운로드",
-        data=json.dumps(response, ensure_ascii=False, indent=2),
-        file_name="logpresso-query-diagnostic.json",
-        mime="application/json",
-    )
     st.divider()
     st.subheader("생성 결과 피드백")
     feedback_rating = st.selectbox("평가", ["positive", "neutral", "negative"], format_func={"positive": "좋음", "neutral": "보통", "negative": "개선 필요"}.get)
