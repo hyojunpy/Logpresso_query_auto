@@ -29,6 +29,14 @@ class LLMProviderTest(unittest.TestCase):
         data = parse_json_object('prefix {"status":"generated","query":"table logs"} suffix')
         self.assertEqual(data["query"], "table logs")
 
+    def test_parse_json_object_recovers_fenced_json_with_trailing_comma(self):
+        data = parse_json_object('```json\n{"status":"generated","query":"table logs",}\n```')
+        self.assertEqual(data["query"], "table logs")
+
+    def test_parse_json_object_uses_first_balanced_object(self):
+        data = parse_json_object('result {"status":"generated","query":"table logs"} commentary {ignored}')
+        self.assertEqual(data["query"], "table logs")
+
     def test_mock_provider_can_return_injected_json_string(self):
         provider = MockProvider(generation_response='{"status":"generated","query":"table logs"}')
         self.assertEqual(provider.generate_json("prompt", [])["query"], "table logs")

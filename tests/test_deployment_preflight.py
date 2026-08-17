@@ -6,6 +6,7 @@ from docx import Document
 from app.services.indexer import DocumentIndex
 import scripts.check_deployment as deployment_preflight
 from scripts.check_deployment import run_checks
+from scripts.check_deployment import _tracked_sensitive_files
 
 
 def test_preflight_reports_ready_local_configuration_without_external_call(tmp_path: Path):
@@ -71,3 +72,11 @@ def test_preflight_main_emits_ascii_safe_json_for_non_ascii_document_path(tmp_pa
     deployment_preflight.main()
 
     capsys.readouterr().out.encode("ascii")
+
+
+def test_tracked_sensitive_file_check_ignores_example_and_flags_runtime_files(tmp_path: Path, monkeypatch):
+    class Result:
+        stdout = ".env.example\n.env\ndata/app.db\ncert/server.pem\n"
+
+    monkeypatch.setattr(deployment_preflight.subprocess, "run", lambda *args, **kwargs: Result())
+    assert _tracked_sensitive_files(tmp_path) == [".env", "cert/server.pem", "data/app.db"]

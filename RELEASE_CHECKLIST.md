@@ -8,18 +8,18 @@ Complete every item before creating a `v*` tag.
 - [ ] Confirm public publication, external redistribution, or modification rights before any broader distribution of the DOCX.
 - [x] Keep the repository without an open-source license; all code rights remain reserved.
 - [x] Set the GitHub repository variable `DOCS_INTERNAL_DISTRIBUTION_APPROVED` to `true` after this internal-sharing approval is recorded.
-- [ ] Confirm that no `.env`, API key, credential, generated database, or private log is tracked.
+- [x] Confirm that no `.env`, API key, credential, generated database, or private log is tracked.
 
 ## Version and verification
 
-- [ ] Update `project.version` in `pyproject.toml` to match the intended tag.
-- [ ] Confirm the release notes include the intended version and date.
-- [ ] Run `python -m pytest`.
-- [ ] Run `docker compose config --quiet`.
-- [ ] In PowerShell, set `$env:COMPOSE_PROJECT_NAME = 'logpresso-release-check'` and `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks.
-- [ ] Stop the release-check stack with the same `COMPOSE_PROJECT_NAME` and `LOGPRESSO_DATA_DIR` values, then remove only `.docker-release-check`.
+- [x] Update `project.version` in `pyproject.toml` to match the intended tag.
+- [x] Confirm the release notes include the intended version and date.
+- [x] Run `python -m pytest`.
+- [x] Run `docker compose config --quiet`.
+- [x] In PowerShell, set `$env:COMPOSE_PROJECT_NAME = 'logpresso-release-check'` and `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks.
+- [x] Stop the release-check stack with the same `COMPOSE_PROJECT_NAME` and `LOGPRESSO_DATA_DIR` values, then remove only `.docker-release-check`.
 - [ ] Confirm the `main` branch CI passes. CodeQL is disabled while this private repository does not have Code Scanning available.
-- [ ] For Ollama-enabled release environments, run the one-case Gold Set smoke evaluation and review aggregate fallback/timeout counters.
+- [x] For Ollama-enabled release environments, run the one-case Gold Set smoke evaluation and review aggregate fallback/timeout counters.
 
 ## Publish
 

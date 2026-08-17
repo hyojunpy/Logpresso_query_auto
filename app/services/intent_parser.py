@@ -60,6 +60,10 @@ class IntentParser:
                 f"Natural-language table aliases inferred: {', '.join(inferred_tables)}. Confirm them against the catalog."
             )
         semantic_hints = self._semantic_field_hints(text, intent.tables)
+        if context.known_fields:
+            # A supplied schema is authoritative: semantic aliases may choose
+            # among known fields but must never invent a new one.
+            semantic_hints = [field for field in semantic_hints if field in context.known_fields]
         known_fields = list(dict.fromkeys([*known_fields, *semantic_hints]))
         if semantic_hints:
             intent.assumptions.append(
@@ -716,7 +720,15 @@ class IntentParser:
             if field:
                 filters.append(FilterCondition(field=field, value="deny"))
         if not has_explicit_string_filter and any(word in text for word in ERROR_WORDS):
-            field = self._field_or_missing(known_fields, "level", "severity", "message", "line")
+            explicit_error_field = re.search(
+                r"(?:에러|오류|error)\s*(?:필드|컬럼|field)\s*(?:는|은|:|=)?\s*([A-Za-z_][A-Za-z0-9_]*)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            requested = explicit_error_field.group(1) if explicit_error_field else None
+            field = requested if requested in known_fields else self._field_or_missing(
+                known_fields, "level", "severity", "message", "line"
+            )
             if field:
                 value = "ERROR" if field in {"message", "line"} else "error"
                 filters.append(FilterCondition(field=field, value=value))

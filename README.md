@@ -106,6 +106,7 @@ LLM_CONTEXT_LIMIT=4
 LLM_CONTEXT_EXCERPT_CHARS=600
 METRICS_RETENTION_DAYS=30
 RETRIEVAL_LIMIT=8
+AUTO_INDEX_DOCUMENTS=true
 LOG_LEVEL=INFO
 CORS_ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
 ENABLE_DEV_EVALUATION=false
@@ -188,9 +189,10 @@ docker compose up --build
 
 `docs`와 `data`는 컨테이너에 볼륨으로 연결됩니다. Docker 환경에서 Ollama를 호스트에서 실행 중이면 기본 `OLLAMA_BASE_URL`을 `http://host.docker.internal:11434`로 설정할 수 있습니다.
 
-새 데이터 폴더로 처음 기동한 경우에는 문서 인덱스가 아직 없어 `/api/v1/ready`가
-`503`을 반환합니다. UI의 재인덱싱 기능 또는 `POST /api/v1/documents/reindex`를 한
-번 실행하면 준비 상태가 `ready`가 됩니다.
+기본값에서는 첫 `/api/v1/ready` 요청 시 문서 인덱스가 없거나 오래되었으면 로컬에서
+자동으로 재생성합니다. 자동 변경을 원하지 않는 운영 환경은
+`AUTO_INDEX_DOCUMENTS=false`로 설정하고 UI 또는 `POST /api/v1/documents/reindex`를
+통해 명시적으로 재인덱싱할 수 있습니다.
 
 ## Streamlit 사용법
 

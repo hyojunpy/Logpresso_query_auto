@@ -34,6 +34,7 @@ class Settings:
     ollama_num_ctx: int = max(1_024, int(os.getenv("OLLAMA_NUM_CTX", "4096")))
     enable_llm_intent_fallback: bool = os.getenv("ENABLE_LLM_INTENT_FALLBACK", "true").lower() in {"1", "true", "yes"}
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
+    auto_index_documents: bool = os.getenv("AUTO_INDEX_DOCUMENTS", "true").lower() in {"1", "true", "yes"}
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}
     # Optional shared-deployment boundary. Leave unset for local single-user use.
     management_api_key: str | None = os.getenv("MANAGEMENT_API_KEY") or None
