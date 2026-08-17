@@ -1,5 +1,15 @@
 # Release Notes
 
+## 0.1.3 - 2026-08-17
+
+- Expanded query intent parsing for logger and stream windows, structured parser options, explode fields, explicit source ordering, and offsets.
+- Improved full-text range, quoted compound-expression, conjunction, sort, and schema-bounded filter handling.
+- Added node-qualified table deduplication and cleaner field-lineage evaluation inputs.
+- Reused Ollama sessions with a bounded keep-alive and exposed candidate/fallback diagnostics for debugging.
+- Improved query copy, download, and validation feedback in the UI.
+- Added a non-blocking advanced-parser roadmap workflow and documented the security gate for file-backed sources.
+- Raised the advanced-parser baseline from 56 passing and 38 failing to 76 passing and 16 failing; 13 remaining cases require the file-source security gate.
+
 ## 0.1.2 - 2026-08-17
 
 - Isolated the Streamlit browser regression test from Docker-oriented LLM environment values.
