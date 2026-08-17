@@ -25,6 +25,15 @@ included in the default CI suite.
    customer access is available. This project must not connect to a customer
    server by default.
 
+## 0.1.2 Baseline
+
+The exploratory suite currently reports 56 passing and 38 failing tests. Simple
+rename/eval lineage is already surfaced as informational validation metadata.
+The remaining failures cluster around file sources, structured parsers,
+compound boolean expressions, source options, and UI wording. File-source
+implementation remains deferred until the upload security entry criteria are
+met; it must not be enabled merely to make roadmap tests pass.
+
 ## Entry Criteria
 
 Each increment needs documented syntax evidence, fixtures without customer log

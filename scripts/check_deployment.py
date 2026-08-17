@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,34 @@ def run_checks(config: Any) -> dict[str, object]:
     if public_origins and not config.management_api_key:
         errors.append("management_api_key_required_for_nonlocal_cors")
     checks["management_api_key_configured"] = bool(config.management_api_key)
+    tracked_sensitive = _tracked_sensitive_files(getattr(config, "repository_root", ROOT))
+    checks["tracked_sensitive_artifacts"] = tracked_sensitive
+    if tracked_sensitive:
+        errors.append("sensitive_artifact_tracked")
     return {"status": "failed" if errors else "passed", "errors": errors, "warnings": warnings, "checks": checks}
+
+
+def _tracked_sensitive_files(root: str | Path) -> list[str]:
+    """Return tracked runtime/secret file names without reading their contents."""
+    try:
+        result = subprocess.run(
+            ["git", "-c", f"safe.directory={Path(root).resolve().as_posix()}", "-C", str(root), "ls-files"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    sensitive: list[str] = []
+    for raw_path in result.stdout.splitlines():
+        path = raw_path.replace("\\", "/")
+        name = Path(path).name.lower()
+        if (name.startswith(".env") and name != ".env.example") or Path(name).suffix in {
+            ".db", ".sqlite", ".sqlite3", ".log", ".pem", ".key", ".p12", ".pfx"
+        }:
+            sensitive.append(path)
+    return sorted(sensitive)
 
 
 def _check_llm_limits(config: Any, errors: list[str], checks: dict[str, object]) -> None:

@@ -26,7 +26,13 @@ def readiness() -> JSONResponse:
     if not checks["document_available"]:
         failures.append("reference_document_missing")
     try:
-        index_status = DocumentIndex(settings.db_path).status(settings.doc_path)
+        index = DocumentIndex(settings.db_path)
+        index_status = index.status(settings.doc_path)
+        if settings.auto_index_documents and checks["document_available"] and (
+            not index_status["indexed"] or index_status["stale"]
+        ):
+            index.ensure_current(settings.doc_path)
+            index_status = index.status(settings.doc_path)
         checks["index"] = {
             "indexed": index_status["indexed"],
             "stale": index_status["stale"],

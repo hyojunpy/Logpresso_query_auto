@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.1.2 - 2026-08-17
+
+- Isolated the Streamlit browser regression test from Docker-oriented LLM environment values.
+- Hardened local-model JSON recovery for fenced responses, embedded objects, and trailing commas.
+- Added opt-out automatic document indexing on readiness checks for a smoother first startup.
+- Added an offline tracked-file check for environment files, databases, logs, and private-key artifacts.
+- Improved schema-bounded error-field inference and recorded the advanced-parser baseline (56 passing, 38 failing).
+- Retained file-source work behind its security entry criteria.
+
 ## 0.1.1 - 2026-08-11
 
 - Bounded Ollama retrieval context, output budget, and request context window

@@ -62,6 +62,25 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(body["checks"]["index"]["indexed"])
         self.assertFalse(body["checks"]["external_call_made"])
 
+    def test_readiness_builds_missing_index_when_auto_index_is_enabled(self):
+        from app.core.config import settings
+
+        originals = (settings.doc_path, settings.db_path, settings.catalog_path, settings.auto_index_documents)
+        try:
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                settings.doc_path = root / "manual.docx"
+                settings.db_path = root / "index.db"
+                settings.catalog_path = root / "catalog.json"
+                settings.auto_index_documents = True
+                write_docx(settings.doc_path, "table duration=24h sample_logs")
+                response = self.client.get("/api/v1/ready")
+        finally:
+            settings.doc_path, settings.db_path, settings.catalog_path, settings.auto_index_documents = originals
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.json()["checks"]["index"]["chunk_count"], 0)
+
     def test_readiness_identifies_missing_reference_document(self):
         from app.core.config import settings
 
