@@ -102,13 +102,18 @@ class CatalogService:
     def resolve(self, context: RequestContext) -> Catalog | None:
         base_catalog = context.catalog or self.load()
         catalogs = [catalog for catalog in (base_catalog, context.request_catalog) if catalog and catalog.tables]
-        if context.known_tables:
+        known_sources = list(dict.fromkeys([
+            *context.known_tables,
+            *context.known_streams,
+            *context.known_loggers,
+        ]))
+        if known_sources and not (context.request_catalog and context.request_catalog.tables):
             catalogs.append(
                 Catalog(
                     source="unknown",
                     tables=[
                         CatalogTable(table_name=name, fields=[CatalogField(field_name=field) for field in context.known_fields])
-                        for name in context.known_tables
+                        for name in known_sources
                     ],
                 )
             )
@@ -150,14 +155,21 @@ class CatalogService:
         warnings: list[ValidationIssue] = []
         tables = self._tables(query)
         table_map = {table.table_name: table for table in catalog.tables}
+        for source in self._realtime_sources(query):
+            if source not in table_map:
+                table_map[source] = CatalogTable(
+                    table_name=source,
+                    fields=[CatalogField(field_name=field) for field in context.known_fields],
+                )
         for table_name in tables:
             if table_name not in table_map and table_name != "YOUR_TABLE":
                 errors.append(ValidationIssue(code="unknown_table", message=f"카탈로그에 '{table_name}' 테이블이 없습니다.", severity="error", affected_table=table_name, suggestion="테이블 이름 또는 카탈로그를 확인하세요.", source="catalog"))
         selected = [table_map[name] for name in tables if name in table_map]
         field_refs = self._field_refs(query)
+        derived_fields = set(re.findall(r"\beval\s+([A-Za-z_][\w]*)\s*=", query, flags=re.IGNORECASE))
         for field in field_refs:
             matches = [table for table in selected if any(item.field_name == field for item in table.fields)]
-            if selected and not matches and field not in {"count", "_time"}:
+            if selected and not matches and field not in {"count", "_time"} and field not in derived_fields:
                 errors.append(ValidationIssue(code="unknown_field", message=f"선택한 테이블에서 '{field}' 필드를 찾을 수 없습니다.", severity="error", affected_field=field, suggestion="필드 이름 또는 카탈로그를 확인하세요.", source="catalog"))
             elif len(selected) > 1 and len(matches) > 1:
                 warnings.append(ValidationIssue(code="ambiguous_field", message=f"'{field}' 필드가 여러 테이블에 있어 모호합니다.", severity="warning", affected_field=field, suggestion="테이블 또는 namespace를 명시하세요.", source="catalog"))
@@ -262,7 +274,21 @@ class CatalogService:
                 tables.append(match.group(1))
         for match in re.finditer(r"\bfulltext\b[^\n|]*\bfrom\s+([^\n|]+)", query, flags=re.IGNORECASE):
             tables.extend(name.strip() for name in match.group(1).split(",") if re.fullmatch(r"[A-Za-z_][\w.]*", name.strip()))
+        for source in CatalogService._realtime_sources(query):
+            if source not in tables:
+                tables.insert(0, source)
         return tables
+
+    @staticmethod
+    def _realtime_sources(query: str) -> list[str]:
+        return [
+            match.group(1)
+            for match in re.finditer(
+                r"(?:^|\|)\s*(?:stream|logger)\s+(?![^\n|]*\bforward=)(?:[A-Za-z_][\w]*=\S+\s+)*([A-Za-z_][\w.\\-]*)",
+                query,
+                flags=re.IGNORECASE | re.MULTILINE,
+            )
+        ]
 
     @staticmethod
     def _field_refs(query: str) -> set[str]:

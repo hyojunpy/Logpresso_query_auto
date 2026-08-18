@@ -1,5 +1,15 @@
 # Release Notes
 
+## 0.1.4 - 2026-08-18
+
+- Added 63 categorized quick-test requests with automatic sample table, stream, logger, and field hints.
+- Made all 63 quick tests generate validated queries without clarification prompts and added exhaustive regression coverage.
+- Improved login-failure, full-text boolean, multi-field grouping, aggregate threshold, structured parser, stream forwarding, and implicit join-key parsing.
+- Added quick-test search, generation readiness indicators, readable documentation references, and table-specific fixture catalogs in the UI.
+- Fixed schema validation for computed fields and live stream/logger sources.
+- Added live source mounts and an offline-friendly PowerShell startup command for Docker development.
+- Restored the local Python 3.12 development environment and expanded query/UI regression tests.
+
 ## 0.1.3 - 2026-08-17
 
 - Expanded query intent parsing for logger and stream windows, structured parser options, explode fields, explicit source ordering, and offsets.

@@ -27,6 +27,14 @@ from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
 from app.services.ollama_status import check_ollama
 from app.services.metrics_store import MetricsStore, metric_label, operational_overview
+try:
+    # Package import when tests or Python load the app from the repository root.
+    from ui.quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
+except ModuleNotFoundError as error:
+    # Streamlit executes this file directly, placing /app/ui (not /app) on sys.path.
+    if error.name != "ui":
+        raise
+    from quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -432,13 +440,30 @@ examples = [
     "에러 로그 보여줘",
 ]
 selected = st.selectbox("예제 요청", [""] + examples)
-quick_requests = [
-    "방화벽에서 외부로 나간 통신 중 많은 IP부터 보고 싶어",
-    "어제 로그인 실패한 사용자들을 계정별로 정리해줘",
-    "인사 정보랑 방화벽 로그를 IP 기준으로 합쳐서 누가 차단됐는지 보고 싶어",
-]
-quick_choice = st.selectbox("빠른 테스트", [""] + quick_requests)
-default_request = quick_choice or selected or st.session_state.get("request_text", "")
+quick_search = st.text_input("빠른 테스트 검색", placeholder="예: join, fulltext, 로그인 실패")
+quick_category = st.selectbox("빠른 테스트 분류", ["전체"] + list(QUICK_TEST_REQUESTS))
+quick_options = (
+    [request for requests in QUICK_TEST_REQUESTS.values() for request in requests]
+    if quick_category == "전체"
+    else QUICK_TEST_REQUESTS.get(quick_category, [])
+)
+if quick_search.strip():
+    quick_options = [request for request in quick_options if quick_search.strip().lower() in request.lower()]
+quick_choice = st.selectbox(
+    "빠른 테스트",
+    [""] + quick_options,
+    format_func=lambda value: f"✅ {value}" if value else "선택하세요",
+)
+quick_preset = build_quick_test_preset(quick_choice) if quick_choice else {}
+if quick_preset:
+    st.success("즉시 생성 가능 · 샘플 스키마 자동 적용")
+    st.caption("테이블별 필드와 실시간 소스 힌트를 분리해 적용합니다.")
+else:
+    st.caption(
+        f"{quick_test_count()}개 복합 예시를 분류별로 제공합니다. "
+        "현재 제공되는 모든 빠른 테스트는 자동 생성 검증을 통과했습니다."
+    )
+default_request = quick_preset.get("request") or selected or st.session_state.get("request_text", "")
 request_text = st.text_area("사용자 요청", value=default_request, height=130)
 with st.expander("생성 전 해석 편집", expanded=False):
     st.caption("자연어 해석이 다를 때 이 값만 보완해 다시 생성할 수 있습니다.")
@@ -459,25 +484,50 @@ def request_fingerprint(text: str, context: RequestContext) -> str:
 def current_context() -> RequestContext:
     catalog_tables = active_catalog.tables if active_catalog else []
     request_tables = request_schema_catalog.tables if request_schema_catalog else []
+    quick_catalog = None
+    quick_source_fields = {
+        **quick_preset.get("table_fields", {}),
+        **quick_preset.get("stream_fields", {}),
+        **quick_preset.get("logger_fields", {}),
+    }
+    if quick_source_fields:
+        quick_catalog = Catalog(
+            source="fixture",
+            tables=[
+                CatalogTable(
+                    table_name=table_name,
+                    fields=[CatalogField(field_name=field_name) for field_name in fields],
+                )
+                for table_name, fields in quick_source_fields.items()
+            ],
+        )
     return RequestContext(
         product=product,
         version=version or None,
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_tables.split(",") if value.strip()]
+            + quick_preset.get("tables", [])
             + st.session_state.get("learned_tables", [])
             + [table.table_name for table in catalog_tables + request_tables]
         )),
         known_fields=list(dict.fromkeys(
             [line.strip() for line in known_fields.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_fields.split(",") if value.strip()]
+            + quick_preset.get("fields", [])
             + st.session_state.get("learned_fields", [])
             + [field.field_name for table in catalog_tables + request_tables for field in table.fields]
         )),
-        known_loggers=[line.strip() for line in known_loggers.splitlines() if line.strip()],
-        known_streams=[line.strip() for line in known_streams.splitlines() if line.strip()],
+        known_loggers=list(dict.fromkeys(
+            [line.strip() for line in known_loggers.splitlines() if line.strip()]
+            + quick_preset.get("loggers", [])
+        )),
+        known_streams=list(dict.fromkeys(
+            [line.strip() for line in known_streams.splitlines() if line.strip()]
+            + quick_preset.get("streams", [])
+        )),
         catalog=active_catalog,
-        request_catalog=request_schema_catalog,
+        request_catalog=request_schema_catalog or quick_catalog,
     )
 
 
@@ -788,7 +838,7 @@ if response:
                     column.caption("감점: " + ", ".join(reasons))
             risk = quality.get("risk_level", "unknown")
             (st.error if risk in {"high", "critical"} else st.warning if risk == "medium" else st.success)(f"위험도: {risk}")
-            for issue in quality.get("diagnostics", []):
+            for issue_index, issue in enumerate(quality.get("diagnostics", [])):
                 message = issue.get("message", "")
                 suggestion = issue.get("suggestion")
                 text = f"{message} {suggestion or ''}".strip()
@@ -798,7 +848,10 @@ if response:
                     st.warning(text)
                 else:
                     st.info(text)
-                if suggestion and st.button("제안 반영", key=f"apply_suggestion_{issue.get('code')}"):
+                if suggestion and st.button(
+                    "제안 반영",
+                    key=f"apply_suggestion_{issue.get('code')}_{issue_index}",
+                ):
                     st.session_state["pending_query_suggestion"] = issue.get("code")
                     st.rerun()
         st.subheader("실행 준비 상태")
@@ -813,7 +866,19 @@ if response:
             st.subheader("수정 쿼리 재검증")
             render_revalidation_summary(edited_analysis)
     with tabs[3]:
-        st.json(response.get("references", []))
+        references = response.get("references", [])
+        if references:
+            for reference_index, reference in enumerate(references):
+                title = f"{reference.get('entry_name', '문서')} · {reference.get('section', '근거')}"
+                with st.expander(title):
+                    st.caption(reference.get("reason", "생성 쿼리에 사용된 문서 근거입니다."))
+                    st.write(reference.get("excerpt", ""))
+                    if reference.get("options"):
+                        st.write("옵션: " + ", ".join(reference["options"]))
+                    if reference.get("functions"):
+                        st.write("함수: " + ", ".join(reference["functions"]))
+        else:
+            st.info("표시할 문서 근거가 없습니다.")
     with tabs[4]:
         st.graphviz_chart(query_structure_dot(response.get("intent") or {}), use_container_width=True)
         st.caption("이 화면은 생성 계획을 시각화한 것이며, Logpresso 실행을 수행하지 않습니다.")

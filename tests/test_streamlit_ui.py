@@ -9,6 +9,28 @@ pytestmark = pytest.mark.advanced_parser
 
 @unittest.skipIf(importlib.util.find_spec("streamlit.testing.v1") is None, "streamlit testing is not installed")
 class StreamlitUiTest(unittest.TestCase):
+    def test_realtime_quick_test_applies_sample_schema_hints(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(Path("ui") / "streamlit_app.py"), default_timeout=15)
+        app.run()
+
+        category = next(item for item in app.selectbox if item.label == "빠른 테스트 분류")
+        category.select("실시간 Logger·Stream").run()
+        quick_test = next(item for item in app.selectbox if item.label == "빠른 테스트")
+        quick_test.select(
+            "security_stream 스트림에서 최근 1분 동안 severity가 7 이상인 이벤트를 "
+            "asset_info 테이블과 src_ip와 ip_address 기준으로 left streamjoin하고 "
+            "event_type별 건수를 많은 순으로 20개 보여줘"
+        ).run()
+        next(button for button in app.button if button.label == "쿼리 생성").click().run()
+
+        self.assertFalse(any("추가 정보가 필요합니다." in item.value for item in app.warning))
+        query = next(block.value for block in app.code if "streamjoin" in block.value)
+        self.assertIn("stream window=1m security_stream", query)
+        self.assertIn("eval _join_key = src_ip", query)
+        self.assertIn("eval _join_key = ip_address", query)
+
     def test_clarification_area_clears_after_successful_generation(self):
         from streamlit.testing.v1 import AppTest
 
@@ -38,8 +60,8 @@ class StreamlitUiTest(unittest.TestCase):
         app.button[0].click().run()
 
         self.assertTrue(any("복사 아이콘" in item.value for item in app.caption))
-        self.assertEqual(len(app.get("download_button")), 1)
-        self.assertEqual(app.get("download_button")[0].label, "쿼리 파일 다운로드")
+        query_download = next(item for item in app.get("download_button") if item.label == "쿼리 파일 다운로드")
+        self.assertEqual(query_download.label, "쿼리 파일 다운로드")
 
     def test_validation_and_references_are_rendered_as_readable_sections(self):
         from streamlit.testing.v1 import AppTest

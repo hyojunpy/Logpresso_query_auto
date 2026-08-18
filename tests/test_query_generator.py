@@ -16,6 +16,23 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_generates_login_failure_join_from_quick_test_schema(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request="최근 24시간 audit_logs의 user와 user_info의 user_id를 기준으로 left join하고 로그인 실패를 보여줘",
+                context=RequestContext(
+                    known_tables=["audit_logs", "user_info"],
+                    known_fields=["_time", "user", "src_ip", "action", "result", "user_id", "user_name"],
+                ),
+            )
+        )
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("audit_logs", response.query)
+        self.assertIn("user_info", response.query)
+        self.assertIn('result == "failed"', response.query)
+        self.assertNotIn("auth_logs", response.query)
+
     def test_llm_context_is_bounded_before_sending_to_provider(self):
         results = [
             SearchResult(
@@ -243,6 +260,24 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status, "generated", response.questions)
         self.assertIn("stream window=10s sample_stream", response.query)
         self.assertIn("| streamjoin type=left _join_key [", response.query)
+
+    def test_streamjoin_maps_unqualified_distinct_key_pair_in_mentioned_order(self):
+        response = generator().generate(
+            GenerateQueryRequest(
+                request=(
+                    "security_stream 스트림에서 최근 1분 동안 asset_info 테이블과 "
+                    "src_ip와 ip_address 기준으로 left streamjoin 해줘"
+                ),
+                context=RequestContext(
+                    known_tables=["asset_info"],
+                    known_fields=["severity", "src_ip", "ip_address", "hostname", "event_type"],
+                    known_streams=["security_stream"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("| eval _join_key = src_ip", response.query)
+        self.assertIn("    | eval _join_key = ip_address", response.query)
 
     def test_join_keeps_time_filter_and_limit_conditions(self):
         response = generator().generate(
