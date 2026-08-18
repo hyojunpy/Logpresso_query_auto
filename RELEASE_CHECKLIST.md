@@ -14,11 +14,11 @@ Complete every item before creating a `v*` tag.
 
 - [x] Update `project.version` in `pyproject.toml` to match the intended tag.
 - [x] Confirm the release notes include the intended version and date.
-- [x] Run `python -m pytest` (241 passed, 1 skipped, 84 deselected).
+- [x] Run `python -m pytest` (246 passed, 1 skipped, 85 deselected).
 - [x] Run `docker compose config --quiet` (Docker CLI 29.7.2, Compose v5.3.1).
 - [x] In PowerShell, set `$env:COMPOSE_PROJECT_NAME = 'logpresso-release-check'` and `$env:LOGPRESSO_DATA_DIR = '.docker-release-check'`, then run `docker compose up --build --detach` and confirm both service health checks (API/UI healthy; HTTP 200).
 - [x] Stop the release-check stack with the same `COMPOSE_PROJECT_NAME` and `LOGPRESSO_DATA_DIR` values, then remove only `.docker-release-check`.
-- [ ] Confirm the `main` branch CI passes for the `v0.1.3` release preparation. CodeQL is disabled while this private repository does not have Code Scanning available.
+- [ ] Confirm the `main` branch CI passes for the `v0.1.4` release preparation. CodeQL is disabled while this private repository does not have Code Scanning available.
 - [x] For Ollama-enabled release environments, run the one-case Gold Set smoke evaluation and review aggregate fallback/timeout counters (semantic and validation passed; 1 safe template fallback, 0 timeouts with `llama3.2:3b`).
 
 ## Publish

@@ -73,7 +73,7 @@ class IntentParser:
         self._parse_command_options(text, known_fields, intent)
         intent.use_parameterized_time_range = self._looks_like_parameterized_time_range(text)
         intent.streams = self._streams(text, context.known_streams) if intent.source_type == "stream" else []
-        intent.forward_streams = self._streams(text) if self._looks_like_stream_forward(text) else []
+        intent.forward_streams = self._forward_streams(text, context.known_streams) if self._looks_like_stream_forward(text) else []
         intent.loggers = self._loggers(text, context.known_loggers) if intent.source_type == "logger" else []
         intent.selected_fields = self._selected_fields(text, known_fields)
         intent.computed_fields = self._computed_fields(text, known_fields)
@@ -94,7 +94,7 @@ class IntentParser:
         offset = re.search(r"(\d+)\s*건을?\s*건너", text)
         intent.offset = int(offset.group(1)) if offset else None
         self._apply_business_shortcuts(text, intent)
-        self._apply_free_form_defaults(text, intent)
+        self._apply_free_form_defaults(text, intent, known_fields)
         if context.known_fields:
             intent.filters = [
                 item for item in intent.filters
@@ -217,15 +217,28 @@ class IntentParser:
             text,
             flags=re.IGNORECASE,
         )
+        distinct_key_match = re.search(
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:와|과|및|,)\s*"
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)?\s*(?:기준|키)",
+            text,
+            flags=re.IGNORECASE,
+        )
         key_match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:를|을)?\s*(?:기준|키)", text)
         if same_key_match:
             left_key = right_key = same_key_match.group(1)
         elif len(explicit_pairs) >= 2:
             left_key = explicit_pairs[0][1]
             right_key = explicit_pairs[1][1]
+        elif distinct_key_match:
+            left_key, right_key = distinct_key_match.groups()
         else:
             left_key = key_match.group(1) if key_match else (mentioned_fields[0] if mentioned_fields else "")
             right_key = next((field for field in mentioned_fields if field != left_key), "")
+        if left_key and not right_key:
+            if "asset_info" in tables:
+                right_key = "hostname" if left_key == "host" else "ip_address"
+            elif "user_info" in tables:
+                right_key = "user_id"
         if not left_key or not right_key:
             if len(tables) >= 2 and re.search(r"\bip\s*(?:기준|로)", text, flags=re.IGNORECASE):
                 left_key = right_key = "ip"
@@ -302,6 +315,9 @@ class IntentParser:
         if "logger" in lowered or "로거" in text or "로그 수집기" in text:
             return "logger"
         if self._looks_like_stream_forward(text):
+            forward_targets = set(self._forward_streams(text, known_streams))
+            if any(stream in text and stream not in forward_targets for stream in (known_streams or [])):
+                return "stream"
             return "table"
         if ("스트림" in text or "stream" in lowered) and not self._looks_like_stream_forward(text):
             return "stream"
@@ -504,6 +520,17 @@ class IntentParser:
     def _table_candidates(text: str, known_tables: list[str]) -> list[str]:
         """Resolve common business terms, preferring a configured catalog name."""
         lowered = text.lower()
+        def choose(defaults: tuple[str, ...]) -> str:
+            configured = next((table for table in known_tables if table.lower() in defaults), None)
+            if configured:
+                return configured
+            family_tokens = {part for default in defaults for part in default.lower().split("_") if part not in {"logs", "log"}}
+            explicit_family = next(
+                (table for table in known_tables if table in text and family_tokens.intersection(table.lower().split("_"))),
+                None,
+            )
+            return explicit_family or defaults[0]
+
         safe_groups: list[tuple[str, ...]] = []
         if "\uBC29\uD654\uBCBD \uB85C\uADF8" in text:
             safe_groups.append(("firewall_logs", "firewall"))
@@ -512,12 +539,12 @@ class IntentParser:
         if "\uC778\uC0AC" in text or "insa" in lowered:
             safe_groups.append(("insa", "hr", "employees"))
         if any(token in text for token in ("\uB85C\uADF8\uC778", "\uC778\uC99D")) or any(token in lowered for token in ("login", "auth")):
-            safe_groups.append(("auth_logs", "login_logs", "authentication_logs"))
+            safe_groups.append(("auth_logs", "login_logs", "authentication_logs", "audit_logs"))
         if any(token in text for token in ("\uC6F9 \uC11C\uBC84", "\uC6F9\uC11C\uBC84")) or "web server" in lowered:
             safe_groups.append(("web_logs", "access_logs"))
         if safe_groups:
             return list(dict.fromkeys(
-                next((table for table in known_tables if table.lower() in defaults), defaults[0])
+                choose(defaults)
                 for defaults in safe_groups
             ))
         candidates: list[str] = []
@@ -529,12 +556,11 @@ class IntentParser:
         if any(phrase in lowered for phrase in ("인사", "insa", "hr db", "hr database")):
             groups.append(("insa", "hr", "employees"))
         if any(phrase in lowered for phrase in ("로그인", "인증", "login", "auth")):
-            groups.append(("auth_logs", "login_logs", "authentication_logs"))
+            groups.append(("auth_logs", "login_logs", "authentication_logs", "audit_logs"))
         if any(phrase in lowered for phrase in ("웹 서버", "웹서버", "web server", "web logs")):
             groups.append(("web_logs", "access_logs"))
         for defaults in groups:
-            configured = next((table for table in known_tables if table.lower() in defaults), None)
-            candidate = configured or defaults[0]
+            candidate = choose(defaults)
             if candidate not in candidates:
                 candidates.append(candidate)
         return candidates
@@ -571,9 +597,17 @@ class IntentParser:
                 intent.aggregations.append(Aggregation(function="count"))
             if not intent.sort:
                 intent.sort.append(SortCondition(field="count", direction="desc"))
+        if re.search(r"\d+\s*개\s*이상의\s*user.*src_ip", text, flags=re.IGNORECASE):
+            intent.group_by = ["src_ip"]
+            intent.aggregations = [Aggregation(function="count", field="user", alias="user_count")]
+            count_match = re.search(r"(\d+)\s*개\s*이상", text)
+            if count_match:
+                intent.post_filters = [
+                    FilterCondition(field="user_count", operator=">=", value=count_match.group(1), value_type="number")
+                ]
 
     @staticmethod
-    def _apply_free_form_defaults(text: str, intent: QueryIntent) -> None:
+    def _apply_free_form_defaults(text: str, intent: QueryIntent, known_fields: list[str]) -> None:
         """Produce a reviewable draft for common operational requests without forcing a second prompt."""
         def add_table(name: str) -> None:
             if name not in intent.tables:
@@ -593,10 +627,17 @@ class IntentParser:
 
         inferred: list[str] = []
         if "\uB85C\uADF8\uC778 \uC2E4\uD328" in text:
-            add_table("auth_logs")
-            add_filter("status", "failure")
-            count_by("account_id" if "\uACC4\uC815" in text else "host")
-            inferred.extend(["auth_logs", "status=failure"])
+            auth_tables = {"auth_logs", "login_logs", "authentication_logs", "audit_logs"}
+            if not any(table.lower() in auth_tables for table in intent.tables):
+                add_table("auth_logs")
+            failure_field = "result" if "result" in known_fields else "status"
+            failure_value = "failed" if failure_field == "result" else "failure"
+            add_filter(failure_field, failure_value)
+            if "\uACC4\uC815\uBCC4" in text:
+                count_by("account_id")
+            elif "\uC11C\uBC84\uBCC4" in text:
+                count_by("host")
+            inferred.extend([f"{failure_field}={failure_value}"])
         if "\uC6F9 \uC11C\uBC84 \uC624\uB958" in text or "\uC6F9\uC11C\uBC84 \uC624\uB958" in text:
             add_table("web_logs")
             add_filter("severity", "error")
@@ -684,14 +725,38 @@ class IntentParser:
         if boolean_match:
             first, second, third = boolean_match.groups()
             return f'"{first}" and ("{second}" or "{third}")'
+        or_terms = re.search(
+            r"([A-Za-z0-9_.:/-]+)\s*(?:또는|혹은|or)\s*([A-Za-z0-9_.:/-]+)(?:\s*(?:을|를))?\s*fulltext",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if or_terms:
+            return f'"{or_terms.group(1)}" or "{or_terms.group(2)}"'
+        and_terms = re.search(
+            r"([A-Za-z0-9_.:/-]+)(?:과|와|\s+and\s+)([A-Za-z0-9_.:/-]+).*?fulltext",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if and_terms:
+            return f'"{and_terms.group(1)}" and "{and_terms.group(2)}"'
+        direct_term = re.search(
+            r"([A-Za-z0-9_.:/-]+)(?:\s*(?:을|를))?\s*fulltext\s*(?:검색|찾아)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if direct_term and direct_term.group(1).lower() != "fulltext":
+            return direct_term.group(1)
         quoted_values = re.findall(r"['\"]([^'\"]+)['\"]", text)
         if len(quoted_values) >= 3 and ("포함하면서" in text or " and " in text.lower()) and any(word in text.lower() for word in (" or ", "또는", "혹은")):
             return f'"{quoted_values[0]}" and ("{quoted_values[1]}" or "{quoted_values[2]}")'
         if len(quoted_values) >= 2 and any(word in text.lower() for word in (" and ", " or ", "그리고", "또는", "혹은")):
             operator = " or " if any(word in text.lower() for word in (" or ", "또는", "혹은")) else " and "
             return operator.join(f'"{value.strip()}"' for value in quoted_values)
-        ip = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
+        ip = re.search(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])", text)
         if ip:
+            paired = re.search(rf"{re.escape(ip.group(0))}(?:과|와|\s+and\s+)([A-Za-z0-9_.:/-]+)", text, flags=re.IGNORECASE)
+            if paired and "모두 포함" in text:
+                return f'"{ip.group(0)}" and "{paired.group(1)}"'
             return ip.group(0)
         quoted = re.search(r"['\"]([^'\"]+)['\"]", text)
         if quoted:
@@ -716,6 +781,20 @@ class IntentParser:
         return [item.strip() for item in match.group(1).split(",")] if match else []
 
     @staticmethod
+    def _forward_streams(text: str, known_streams: list[str] | None = None) -> list[str]:
+        configured = [
+            stream for stream in (known_streams or [])
+            if re.search(rf"{re.escape(stream)}\s*(?:으로|로)?\s*(?:전달|전송|보내)", text)
+        ]
+        if configured:
+            return configured
+        match = re.search(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:스트림)?(?:으로|로)?\s*(?:전달|전송|보내)",
+            text,
+        )
+        return [match.group(1)] if match else []
+
+    @staticmethod
     def _window(text: str) -> str | None:
         match = re.search(r"(\d+)\s*(초|분|시간)\s*(?:간|동안)?", text)
         return f"{match.group(1)}{ {'초':'s','분':'m','시간':'h'}[match.group(2)] }" if match else None
@@ -737,9 +816,10 @@ class IntentParser:
         if "json" in lowered and ("파싱" in text or "parse" in lowered):
             intent.structured_parser, intent.structured_parser_field = "parsejson", field
             intent.parser_flatten = "중첩" in text or "펼쳐" in text
-        elif "tsv" in lowered and ("파싱" in text or "parse" in lowered):
-            intent.structured_parser, intent.structured_parser_field, intent.parser_tab = "parsecsv", field, True
-        if ("배열" in text and "행으로" in text) or "explode" in lowered:
+        elif any(format_ in lowered for format_ in ("csv", "tsv")) and ("파싱" in text or "parse" in lowered):
+            intent.structured_parser, intent.structured_parser_field = "parsecsv", field
+            intent.parser_tab = "tsv" in lowered
+        if (("배열" in text or "펼쳐" in text) and any(cue in text for cue in ("행으로", "펼쳐"))) or "explode" in lowered:
             intent.explode_fields = [name for name in known_fields if name in text][:1]
         if "오래된 로그부터" in text:
             intent.source_order = "asc"
@@ -809,7 +889,46 @@ class IntentParser:
         filters.extend(self._comparison_filters(text, known_fields))
         filters.extend(self._string_comparison_filters(text, known_fields))
         filters.extend(self._contains_filters(text, known_fields))
+        filters.extend(self._quick_operational_filters(text, known_fields))
         return self._without_post_filters(self._unique_filters(filters), post_filters or [])
+
+    def _quick_operational_filters(self, text: str, known_fields: list[str]) -> list[FilterCondition]:
+        filters: list[FilterCondition] = []
+        if "status" in known_fields and re.search(r"\b5xx\b", text, flags=re.IGNORECASE):
+            filters.extend([
+                FilterCondition(field="status", operator=">=", value="500", value_type="number"),
+                FilterCondition(field="status", operator="<", value="600", value_type="number"),
+            ])
+        port_field = self._field_or_missing(known_fields, "dst_port", "port")
+        port_values = re.search(r"(?:목적지\s*)?포트(?:가|이|는|은)?\s*\b(\d{1,5})\b\s*(?:또는|혹은|or)\s*\b(\d{1,5})\b", text, flags=re.IGNORECASE)
+        if port_field and port_values:
+            filters.extend([
+                FilterCondition(field=port_field, value=port_values.group(1), value_type="number"),
+                FilterCondition(field=port_field, value=port_values.group(2), value_type="number", conjunction="or"),
+            ])
+        for field in known_fields:
+            contains_or = re.search(
+                rf"{re.escape(field)}.*?([A-Za-z0-9_.:/-]+)\s*(?:또는|혹은|or)\s*([A-Za-z0-9_.:/ -]+?)\s*(?:가|이)?\s*포함",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if contains_or:
+                first, second = contains_or.groups()
+                filters.extend([
+                    FilterCondition(field=field, operator="contains", value=first.strip()),
+                    FilterCondition(field=field, operator="contains", value=second.strip(), conjunction="or"),
+                ])
+                break
+        if "user" in known_fields and re.search(r"admin\s*사용자", text, flags=re.IGNORECASE):
+            filters.append(FilterCondition(field="user", value="admin"))
+        result_match = re.search(r"(?<![A-Za-z0-9_])(result|status)(?![A-Za-z0-9_])\s*(?:가|이|는|은)?\s*([A-Za-z0-9_.-]+)\s*(?:이면|인)", text)
+        if result_match and result_match.group(1) in known_fields:
+            filters.append(FilterCondition(field=result_match.group(1), value=result_match.group(2)))
+        if "level" in known_fields and "warning" in text.lower() and not any(item.field == "level" for item in filters):
+            filters.append(FilterCondition(field="level", value="warning"))
+        if "level" in known_fields and "warning" in text.lower() and "error" in text.lower():
+            filters.append(FilterCondition(field="level", value="error", conjunction="or"))
+        return filters
 
     def _comparison_filters(self, text: str, known_fields: list[str]) -> list[FilterCondition]:
         operator_map = {
@@ -1042,6 +1161,25 @@ class IntentParser:
                 from app.models.request import ComputedField
 
                 computed.append(ComputedField(name=target, expression=expression))
+        if "bytes_in" in known_fields and "bytes_out" in known_fields and "전체 사용량" in text:
+            from app.models.request import ComputedField
+
+            computed.append(ComputedField(name="total_bytes", expression="bytes_in + bytes_out"))
+        if "bytes_in" in known_fields and "bytes_out" in known_fields and "MB로 환산" in text:
+            from app.models.request import ComputedField
+
+            computed.append(ComputedField(name="total_mb", expression="(bytes_in + bytes_out) / 1024 / 1024"))
+        conditional = re.search(
+            r"(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_])\s*(?:가|이)?\s*([A-Za-z0-9_.-]+)\s*(?:이면|일 때)\s*(?:1|([A-Za-z0-9_.-]+))?(?:로)?\s*(?:계산|분류)",
+            text,
+        )
+        if conditional and conditional.group(1) in known_fields:
+            from app.models.request import ComputedField
+
+            field, value, label = conditional.groups()
+            target = f"is_{value}" if value != "failed" else "failure_count"
+            true_value = f'"{label}"' if label else "1"
+            computed.append(ComputedField(name=target, expression=f'if({field} == "{value}", {true_value}, 0)'))
         return computed
 
     def _looks_like_computation(self, text: str) -> bool:
@@ -1082,6 +1220,32 @@ class IntentParser:
                 self._append_aggregation(aggregations, word, field)
             for function, field in re.findall(rf"\b(avg|sum|max|min)\s*\(\s*({field_pattern})\s*\)", text, flags=re.IGNORECASE):
                 self._append_aggregation(aggregations, function, field)
+            for word, field in re.findall(rf"({word_pattern})\s+({field_pattern})(?![A-Za-z0-9_])", text, flags=re.IGNORECASE):
+                self._append_aggregation(aggregations, word, field)
+            for field, words in re.findall(
+                rf"({field_pattern})(?![A-Za-z0-9_])\s*의.*?((?:{word_pattern})(?:\s*(?:및|과|와|,)\s*(?:{word_pattern}))*)",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                if field.lower().endswith(("_log", "_logs", "_table")):
+                    continue
+                for word in re.findall(word_pattern, words, flags=re.IGNORECASE):
+                    self._append_aggregation(aggregations, word, field)
+            metric_sequence = rf"((?:{word_pattern})(?:\s*(?:및|과|와|,)\s*(?:{word_pattern}))*)\s*(?:값|을|를)?\s*\b({field_pattern})\b"
+            for words, field in re.findall(metric_sequence, text, flags=re.IGNORECASE):
+                for word in re.findall(word_pattern, words, flags=re.IGNORECASE):
+                    self._append_aggregation(aggregations, word, field)
+            grouped_metric = rf"\b({field_pattern})\b\s*의\s*\b(?:{field_pattern})\b\s*(?:별|별로)\s*((?:{word_pattern})(?:\s*(?:및|과|와|,)\s*(?:{word_pattern}))*)"
+            for field, words in re.findall(grouped_metric, text, flags=re.IGNORECASE):
+                for word in re.findall(word_pattern, words, flags=re.IGNORECASE):
+                    self._append_aggregation(aggregations, word, field)
+            pair_sum = re.search(
+                rf"\b({field_pattern})\b\s*(?:와|과)\s*\b({field_pattern})\b\s*(?:의\s*)?(?:합계|합)",
+                text,
+            )
+            if pair_sum:
+                self._append_aggregation(aggregations, "합계", pair_sum.group(1))
+                self._append_aggregation(aggregations, "합계", pair_sum.group(2))
         if self._looks_like_sample_aggregation(text):
             field = self._sample_field(known_fields)
             if field:
@@ -1089,8 +1253,12 @@ class IntentParser:
                 aggregations.append(
                     Aggregation(function=function, field=field, alias=f"{function}_{self._alias_field(field)}")
                 )
+        conditional_failure = bool(re.search(r"result\s*(?:가|이)?\s*failed\s*이면\s*1", text, flags=re.IGNORECASE))
+        if conditional_failure:
+            aggregations.append(Aggregation(function="sum", field="failure_count", alias="sum_failure_count"))
         if (
-            any(word in text for word in COUNT_ONLY_WORDS)
+            (any(word in text for word in COUNT_ONLY_WORDS) and not conditional_failure)
+            or re.search(r"\d+\s*건\s*(?:이상|초과|이하|미만)", text)
             or any(phrase in text for phrase in ("많이 나온", "적게 나온", "가장 많이", "가장 적게"))
             or self._looks_like_ratio(text)
             or self._looks_like_unique_values(text)
@@ -1157,6 +1325,13 @@ class IntentParser:
                             value_type="number",
                         )
                     )
+        if any(item.function == "count" for item in aggregations):
+            generic_count = re.search(r"(\d+)\s*건\s*(이상|초과|이하|미만)", text)
+            if generic_count:
+                value, op = generic_count.groups()
+                filters.append(
+                    FilterCondition(field="count", operator=operator_map[op], value=value, value_type="number")
+                )
         return self._unique_filters(filters)
 
     def _aggregation_filter_names(self, aggregation: Aggregation) -> list[str]:
@@ -1177,6 +1352,12 @@ class IntentParser:
         return [name for name in names if name]
 
     def _group_by(self, text: str, known_fields: list[str]) -> list[str]:
+        multi_group = re.search(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:와|과|,)\s*\b([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:별|별로)",
+            text,
+        )
+        if multi_group:
+            return [field for field in multi_group.groups() if field in known_fields]
         groups = [
             field
             for field in known_fields
@@ -1184,6 +1365,12 @@ class IntentParser:
         ]
         if groups:
             return groups
+        result_group = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:를|을)\s*(?:많은|적은)\s*순", text)
+        if result_group and result_group.group(1) in known_fields:
+            return [result_group.group(1)]
+        count_subject = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:를|을)?\s*(?:보여|찾아)", text)
+        if count_subject and count_subject.group(1) in known_fields and re.search(r"\d+\s*건\s*이상", text):
+            return [count_subject.group(1)]
         if any(phrase in text for phrase in ("많이 나온", "적게 나온", "가장 많이", "가장 적게")):
             mentioned = [
                 field
@@ -1242,9 +1429,12 @@ class IntentParser:
         after_offset = re.search(r"건너뛰고\s*(\d+)\s*(?:개|건|줄|행)", text)
         if after_offset:
             return int(after_offset.group(1))
+        after_offset = re.search(r"건너뛴\s*뒤\s*(\d+)\s*(?:개|건|줄|행)", text)
+        if after_offset:
+            return int(after_offset.group(1))
         if re.search(r"\d+\s*건을?\s*건너", text):
             return None
-        match = re.search(r"(\d+)\s*(?:개|건|줄|행)", text)
+        match = re.search(r"(\d+)\s*(?:개|건|줄|행)(?!\s*(?:이상|초과|이하|미만))", text)
         return int(match.group(1)) if match else None
 
     def _collect_missing_information(self, intent: QueryIntent, text: str, known_fields: list[str]) -> None:
@@ -1334,7 +1524,11 @@ class IntentParser:
         )
 
     def _looks_like_metric_aggregation(self, text: str) -> bool:
-        return any(word in text for word in AGGREGATION_WORDS)
+        korean_words = [word for word in AGGREGATION_WORDS if not word.isascii()]
+        ascii_words = [word for word in AGGREGATION_WORDS if word.isascii()]
+        return any(word in text for word in korean_words) or any(
+            re.search(rf"\b{re.escape(word)}\b", text, flags=re.IGNORECASE) for word in ascii_words
+        )
 
     def _looks_like_ratio(self, text: str) -> bool:
         return any(word in text.lower() for word in ("비율", "퍼센트", "percent", "percentage", "ratio", "%"))
@@ -1358,7 +1552,9 @@ class IntentParser:
 
     def _looks_like_sample_aggregation(self, text: str) -> bool:
         sample_target = any(word in text for word in ("로그", "이벤트", "레코드", "샘플"))
-        sample_word = any(word in text for word in ("첫 번째", "첫번째", "처음", "대표", "샘플", "마지막", "최신"))
+        sample_word = any(word in text for word in ("첫 번째", "첫번째", "처음", "대표", "샘플", "마지막")) or (
+            "최신" in text and "최신순" not in text
+        )
         return sample_target and sample_word
 
     def _sample_function(self, text: str) -> str:
