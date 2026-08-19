@@ -63,6 +63,8 @@ services:
       UI_AUTH_ENABLED: ${UI_AUTH_ENABLED:-false}
       UI_USERS_JSON: ${UI_USERS_JSON:-{}}
       SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-60}
+      AUTH_MAX_FAILURES: ${AUTH_MAX_FAILURES:-5}
+      AUTH_LOCKOUT_MINUTES: ${AUTH_LOCKOUT_MINUTES:-15}
       LOG_FILE: ${LOG_FILE:-/app/data/logs/app.jsonl}
     volumes:
       - .:/app

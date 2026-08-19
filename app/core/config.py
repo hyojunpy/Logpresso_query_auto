@@ -41,6 +41,9 @@ class Settings:
     ui_auth_enabled: bool = os.getenv("UI_AUTH_ENABLED", "false").lower() in {"1", "true", "yes"}
     ui_users_json: str = os.getenv("UI_USERS_JSON", "{}")
     session_idle_minutes: int = max(5, int(os.getenv("SESSION_IDLE_MINUTES", "60")))
+    auth_max_failures: int = max(3, int(os.getenv("AUTH_MAX_FAILURES", "5")))
+    auth_lockout_minutes: int = max(1, int(os.getenv("AUTH_LOCKOUT_MINUTES", "15")))
+    auth_db_path: Path = data_dir / "auth.db"
     log_file: Path = Path(os.getenv("LOG_FILE", str(data_dir / "logs" / "app.jsonl")))
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     cors_allowed_origins: tuple[str, ...] = tuple(

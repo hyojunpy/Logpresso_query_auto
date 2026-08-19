@@ -19,19 +19,22 @@ scripts/start_dev.ps1
 ## 사용자 로그인
 
 ```powershell
-scripts/new_ui_user.ps1 -Username admin
+scripts/new_ui_user.ps1 -Username admin -Role admin
 scripts/start_dev.ps1
 ```
 
 비밀번호는 PBKDF2-SHA256 해시로만 `.env`에 저장됩니다. 계정 추가 후에는
 서비스를 재시작합니다. 로그인 이후 사용자 요청, 결과, 편집 이력과 힌트는
 각 브라우저 세션에 분리되며 기본 60분 동안 활동이 없으면 로그아웃됩니다.
+역할은 `viewer`(생성·검증), `editor`(별칭 관리 포함), `admin`(카탈로그·운영 관리 포함)입니다.
+로그인은 기본 5회 실패 시 15분 동안 계정 이름 기준으로 잠깁니다.
 
 ## 상태·로그·부하 확인
 
 ```powershell
 scripts/status.ps1
 docker compose exec -T api python /app/scripts/load_test.py --requests 100 --concurrency 10
+docker compose exec -T api python /app/scripts/load_test.py --generate --requests 5 --concurrency 2 --timeout 60
 ```
 
 API 구조화 로그는 `data/logs/app.jsonl` 또는 개발 구성의
@@ -49,6 +52,15 @@ scripts/install_autostart.ps1
 현재 Windows 사용자가 로그인할 때 숨김 PowerShell 작업으로 Compose를
 시작합니다. 제거는 `scripts/install_autostart.ps1 -Uninstall`입니다.
 
+상태 점검과 일일 백업도 예약할 수 있습니다.
+
+```powershell
+scripts/install_maintenance.ps1
+```
+
+매일 02:00에 백업하고 5분마다 API와 Ollama를 확인합니다. `.env`의
+`ALERT_WEBHOOK_URL`을 설정하면 실패 메시지만 해당 웹훅에 전달합니다.
+
 ## 백업과 복구
 
 ```powershell
@@ -65,6 +77,26 @@ scripts/start_dev.ps1
 ```
 
 복구 스크립트는 기존 데이터 디렉터리가 남아 있으면 안전을 위해 중단합니다.
+실제 데이터를 교체하지 않는 복원 리허설은 다음과 같습니다.
+
+```powershell
+scripts/verify_backup.ps1 -Archive <zip 경로>
+```
+
+백업은 기본 14일, 로그 파일은 기본 30일 보관하며 백업 실행 시 오래된 파일을 정리합니다.
+
+## HTTPS 프록시
+
+```powershell
+scripts/start_https.ps1
+```
+
+Caddy 내부 CA를 사용하는 `https://<서버 IP>:8443/`가 추가됩니다. 기존 HTTP
+8501은 인증서 배포 중 접속 중단을 피하기 위해 유지됩니다. 생성된 CA는
+`.docker-dev/certificates/logpresso-local-ca.crt`에 있으며, 사내 인증서 정책에
+따라 각 클라이언트의 신뢰 루트에 배포한 뒤 HTTPS를 사용하십시오. 임의로
+브라우저 인증서 경고를 무시하지 마십시오. 운영 환경에 사내 PKI나 리버스
+프록시가 있으면 Caddy 내부 CA 대신 그 인증서를 사용하는 것이 권장됩니다.
 
 ## 다른 PC 접속 점검
 

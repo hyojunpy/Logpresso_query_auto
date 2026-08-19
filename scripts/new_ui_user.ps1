@@ -1,4 +1,7 @@
-param([Parameter(Mandatory=$true)][string]$Username)
+param(
+    [Parameter(Mandatory=$true)][string]$Username,
+    [ValidateSet("viewer", "editor", "admin")][string]$Role = "viewer"
+)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 $envFile = Join-Path $repo ".env"
@@ -22,10 +25,10 @@ if ($existing) {
     if ($raw.StartsWith("'") -and $raw.EndsWith("'")) { $raw = $raw.Substring(1, $raw.Length - 2) }
     if ($raw -and $raw -ne '{}') { (ConvertFrom-Json $raw).PSObject.Properties | ForEach-Object { $users[$_.Name] = $_.Value } }
 }
-$users[$Username] = $encoded
+$users[$Username] = @{ password_hash = $encoded; role = $Role }
 $json = ConvertTo-Json $users -Compress
 $lines = [Collections.Generic.List[string]]($lines | Where-Object { $_ -notlike 'UI_USERS_JSON=*' -and $_ -notlike 'UI_AUTH_ENABLED=*' })
 $lines.Add("UI_AUTH_ENABLED=true")
 $lines.Add("UI_USERS_JSON='$json'")
 Set-Content -LiteralPath $envFile -Value $lines -Encoding utf8
-Write-Host "사용자 '$Username'를 저장했습니다. scripts/start_dev.ps1 로 재시작하세요."
+Write-Host "사용자 '$Username'를 '$Role' 역할로 저장했습니다. scripts/start_dev.ps1 로 재시작하세요."
