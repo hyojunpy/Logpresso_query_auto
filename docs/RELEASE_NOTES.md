@@ -60,6 +60,11 @@
 - `RUN_BROWSER_TESTS=1 python -m pytest tests/test_streamlit_browser.py -q`
 - `docker compose config --quiet`
 - Start Compose with a disposable data directory and verify API/UI health.
+# v0.1.6
+
+- Fixed the Caddy healthcheck to use the configured LAN certificate address and
+  moved the HTTPS endpoint to port 9443 to avoid stale Windows port reservations.
+
 # v0.1.5
 
 - Added PBKDF2-protected LAN UI login, idle expiration, five-attempt lockout,

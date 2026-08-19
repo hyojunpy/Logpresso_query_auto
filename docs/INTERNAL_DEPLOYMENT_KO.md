@@ -91,7 +91,7 @@ scripts/verify_backup.ps1 -Archive <zip 경로>
 scripts/start_https.ps1
 ```
 
-Caddy 내부 CA를 사용하는 `https://<서버 IP>:8443/`가 추가됩니다. 기존 HTTP
+Caddy 내부 CA를 사용하는 `https://<서버 IP>:9443/`가 추가됩니다. 기존 HTTP
 8501은 인증서 배포 중 접속 중단을 피하기 위해 유지됩니다. 생성된 CA는
 `.docker-dev/certificates/logpresso-local-ca.crt`에 있으며, 사내 인증서 정책에
 따라 각 클라이언트의 신뢰 루트에 배포한 뒤 HTTPS를 사용하십시오. 임의로
