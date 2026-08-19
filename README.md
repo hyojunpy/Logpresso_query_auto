@@ -90,6 +90,7 @@ pip install -c requirements.lock -e '.[dev]'
 ## 환경 변수
 
 운영 권한 경계와 고객사 파일 기반 카탈로그 교환 방식은 [OPERATIONS.md](docs/OPERATIONS.md)를 참고하세요. CSV 카탈로그 예시는 [catalog-template.csv](docs/catalog-template.csv)입니다.
+사내망 UI 공유, 로그인, 자동 시작, 로그와 백업 절차는 [사내망 배포 안내](docs/INTERNAL_DEPLOYMENT_KO.md)를 참고하세요.
 
 `.env.example`을 참고해 필요한 값을 설정합니다. 기본값은 외부 모델 호출이 없는 `mock` 모드입니다.
 
@@ -112,6 +113,12 @@ CORS_ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
 ENABLE_DEV_EVALUATION=false
 ENABLE_LLM_INTENT_FALLBACK=true
 MANAGEMENT_API_KEY=
+UI_AUTH_ENABLED=false
+UI_USERS_JSON={}
+SESSION_IDLE_MINUTES=60
+AUTH_MAX_FAILURES=5
+AUTH_LOCKOUT_MINUTES=15
+ALERT_WEBHOOK_URL=
 ```
 
 `LLM_PROVIDER` 값:

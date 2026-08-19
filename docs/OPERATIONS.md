@@ -19,19 +19,25 @@ queries, create schedules, or call a customer Logpresso server.
 - Feedback summary and improvement-candidate endpoints
 - Development evaluation endpoints
 
-Use the customer's existing identity provider or a reverse proxy. Do not add a
-separate password store to this project. Apply role checks at the API boundary,
-keep audit metadata, and restrict catalog exports when they contain sensitive
-schema descriptions.
+For a small internal deployment, the Streamlit UI supports an environment-based
+PBKDF2 password guard. Passwords are never stored in plaintext. For larger or
+internet-facing deployments, use the customer's identity provider or an
+authenticated reverse proxy and apply role checks at the API boundary.
 
 ## Authentication And Audit Integration
 
-The application does not authenticate users itself. A reverse proxy or customer
-identity provider should enforce the roles above and may forward a non-sensitive
-`X-Actor-ID` header. Management actions record only action type, resource,
+The built-in UI login is intended for a small LAN deployment. A reverse proxy or
+customer identity provider should enforce the roles above for larger deployments
+and may forward a non-sensitive `X-Actor-ID` header. Management actions record only action type, resource,
 actor identifier, small metadata such as table count, and timestamp in the
 local `management_audit` SQLite table. Request text, generated queries, and log
 content are intentionally excluded from this audit trail.
+
+For LAN-only UI login, set `UI_AUTH_ENABLED=true` and use
+`scripts/new_ui_user.ps1 -Username <name>`. Each browser connection has an
+independent Streamlit session; query drafts, learned hints, and edit history are
+kept in that session and are not copied between users. Sessions expire after
+`SESSION_IDLE_MINUTES` of inactivity.
 
 ## Optional API Key Guard
 

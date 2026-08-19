@@ -60,3 +60,15 @@
 - `RUN_BROWSER_TESTS=1 python -m pytest tests/test_streamlit_browser.py -q`
 - `docker compose config --quiet`
 - Start Compose with a disposable data directory and verify API/UI health.
+# v0.1.5
+
+- Added PBKDF2-protected LAN UI login, idle expiration, five-attempt lockout,
+  and viewer/editor/admin roles.
+- Added concurrent health and real query-generation load tests.
+- Added persistent privacy-safe JSON logs, API/Ollama monitoring, optional
+  webhook alerts, scheduled daily backups, retention cleanup, and restore
+  integrity rehearsal.
+- Added LAN setup, Windows auto-start/maintenance tasks, and a Caddy-based
+  internal HTTPS endpoint with documented CA distribution.
+- Kept the API bound to loopback while allowing the UI on an explicitly chosen
+  LAN address.

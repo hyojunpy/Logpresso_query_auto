@@ -20,11 +20,13 @@ env/
 
 # Runtime data
 data/
+.docker-dev/
 .ci-data/
 *.db
 *.sqlite
 *.sqlite3
 *.log
+backups/
 
 # OS/editor
 .DS_Store

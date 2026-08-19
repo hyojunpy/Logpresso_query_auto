@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from app.core.config import settings
+from app.core.ui_auth import LoginAttemptStore, authenticate, load_users, session_expired
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
@@ -38,6 +39,65 @@ except ModuleNotFoundError as error:
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
+
+
+def require_login() -> None:
+    if not settings.ui_auth_enabled:
+        return
+    try:
+        users = load_users(settings.ui_users_json)
+    except ValueError:
+        st.error("로그인 설정이 올바르지 않습니다. 관리자에게 문의하세요.")
+        st.stop()
+    now = datetime.now(timezone.utc)
+    attempt_store = LoginAttemptStore(settings.auth_db_path, settings.auth_max_failures, settings.auth_lockout_minutes)
+    if st.session_state.get("authenticated") and session_expired(
+        st.session_state.get("auth_last_seen"), settings.session_idle_minutes, now=now
+    ):
+        for key in list(st.session_state):
+            del st.session_state[key]
+        st.warning("장시간 사용하지 않아 로그아웃되었습니다.")
+    if st.session_state.get("authenticated"):
+        st.session_state["auth_last_seen"] = now
+        with st.sidebar:
+            st.caption(f"사용자: {st.session_state['auth_username']} ({st.session_state['auth_role']})")
+            if st.button("로그아웃", key="logout_button"):
+                for key in list(st.session_state):
+                    del st.session_state[key]
+                st.rerun()
+        return
+    st.title("로그프레소 쿼리 생성기 로그인")
+    with st.form("login_form"):
+        username = st.text_input("사용자 이름")
+        password = st.text_input("비밀번호", type="password")
+        submitted = st.form_submit_button("로그인", type="primary")
+    if submitted:
+        locked_seconds = attempt_store.locked_seconds(username, now=now)
+        if locked_seconds:
+            st.error(f"로그인 시도가 잠겼습니다. 약 {(locked_seconds + 59) // 60}분 후 다시 시도하세요.")
+        else:
+            result = authenticate(username, password, users)
+        if not locked_seconds and result.ok:
+            attempt_store.clear(username)
+            st.session_state["authenticated"] = True
+            st.session_state["auth_username"] = result.username
+            st.session_state["auth_role"] = result.role
+            st.session_state["auth_last_seen"] = now
+            st.rerun()
+        if not locked_seconds:
+            newly_locked = attempt_store.record_failure(username, now=now)
+            if newly_locked:
+                st.error(f"로그인 실패 횟수를 초과해 {settings.auth_lockout_minutes}분 동안 잠겼습니다.")
+            else:
+                st.error("사용자 이름 또는 비밀번호가 올바르지 않습니다.")
+    st.stop()
+
+
+require_login()
+
+
+def has_role(*roles: str) -> bool:
+    return not settings.ui_auth_enabled or st.session_state.get("auth_role") in roles
 
 index = DocumentIndex(settings.db_path)
 status = index.status(settings.doc_path)
@@ -197,7 +257,7 @@ with st.sidebar:
             else:
                 st.dataframe(alias_preview, use_container_width=True, hide_index=True)
         import_confirmed = st.checkbox("미리보기와 변경 대상이 맞는지 확인했습니다.", key="alias_csv_import_confirmed")
-        if alias_file is not None and st.button("별칭 CSV 저장", disabled=not alias_preview or not import_confirmed):
+        if alias_file is not None and st.button("별칭 CSV 저장", disabled=not alias_preview or not import_confirmed or not has_role("editor", "admin")):
             try:
                 count = alias_store.import_csv_bytes(alias_file.getvalue())
             except AliasImportError as error:
@@ -209,7 +269,7 @@ with st.sidebar:
         alias_target = st.text_input("테이블 또는 필드", key="alias_target", placeholder="예: corp_firewall_logs")
         alias_kind = st.selectbox("별칭 종류", ["table", "field"], key="alias_kind")
         alias_scope = st.selectbox("적용 범위", ["공통", "ENT", "STD", "SNR", "FRS"], key="alias_scope")
-        if st.button("별칭 저장"):
+        if st.button("별칭 저장", disabled=not has_role("editor", "admin")):
             try:
                 alias_store.save(alias_phrase, alias_target, alias_kind, "" if alias_scope == "공통" else alias_scope)
             except ValueError as error:
@@ -231,7 +291,7 @@ with st.sidebar:
                 mime="text/csv",
             )
             alias_to_delete = st.selectbox("삭제할 별칭", [""] + [f"{item['kind']}: {item['phrase']}" for item in aliases])
-            if st.button("선택 별칭 삭제") and alias_to_delete:
+            if st.button("선택 별칭 삭제", disabled=not has_role("editor", "admin")) and alias_to_delete:
                 kind, phrase = alias_to_delete.split(": ", 1)
                 alias_store.delete(phrase, kind)
                 st.rerun()
@@ -303,7 +363,7 @@ with st.sidebar:
             use_container_width=True,
             key="catalog_editor",
         )
-        if st.button("카탈로그 저장"):
+        if st.button("카탈로그 저장", disabled=not has_role("admin")):
             try:
                 saved_catalog = catalog_service.save(catalog_from_rows(edited_rows, active_catalog))
             except ValueError as error:
@@ -323,7 +383,7 @@ with st.sidebar:
                 "현재 카탈로그를 선택한 백업으로 교체합니다. 현재 버전은 새 백업으로 보관됩니다.",
                 key="catalog_restore_confirmed",
             )
-            if st.button("선택한 백업 복원", disabled=not restore_confirmed):
+            if st.button("선택한 백업 복원", disabled=not restore_confirmed or not has_role("admin")):
                 try:
                     restored = catalog_service.restore(backup_name)
                 except (FileNotFoundError, ValueError) as error:
@@ -338,7 +398,7 @@ with st.sidebar:
             file_name="logpresso-catalog.json",
             mime="application/json",
         )
-    if st.button("문서 다시 인덱싱"):
+    if st.button("문서 다시 인덱싱", disabled=not has_role("admin")):
         result = index.rebuild(settings.doc_path)
         st.success(f"{result['chunk_count']}개 청크를 인덱싱했습니다.")
 
