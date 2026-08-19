@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from app.core.config import settings
+from app.core.ui_auth import authenticate, load_users, session_expired
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
@@ -38,6 +39,49 @@ except ModuleNotFoundError as error:
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
+
+
+def require_login() -> None:
+    if not settings.ui_auth_enabled:
+        return
+    try:
+        users = load_users(settings.ui_users_json)
+    except ValueError:
+        st.error("로그인 설정이 올바르지 않습니다. 관리자에게 문의하세요.")
+        st.stop()
+    now = datetime.now(timezone.utc)
+    if st.session_state.get("authenticated") and session_expired(
+        st.session_state.get("auth_last_seen"), settings.session_idle_minutes, now=now
+    ):
+        for key in list(st.session_state):
+            del st.session_state[key]
+        st.warning("장시간 사용하지 않아 로그아웃되었습니다.")
+    if st.session_state.get("authenticated"):
+        st.session_state["auth_last_seen"] = now
+        with st.sidebar:
+            st.caption(f"사용자: {st.session_state['auth_username']}")
+            if st.button("로그아웃", key="logout_button"):
+                for key in list(st.session_state):
+                    del st.session_state[key]
+                st.rerun()
+        return
+    st.title("로그프레소 쿼리 생성기 로그인")
+    with st.form("login_form"):
+        username = st.text_input("사용자 이름")
+        password = st.text_input("비밀번호", type="password")
+        submitted = st.form_submit_button("로그인", type="primary")
+    if submitted:
+        result = authenticate(username, password, users)
+        if result.ok:
+            st.session_state["authenticated"] = True
+            st.session_state["auth_username"] = result.username
+            st.session_state["auth_last_seen"] = now
+            st.rerun()
+        st.error("사용자 이름 또는 비밀번호가 올바르지 않습니다.")
+    st.stop()
+
+
+require_login()
 
 index = DocumentIndex(settings.db_path)
 status = index.status(settings.doc_path)

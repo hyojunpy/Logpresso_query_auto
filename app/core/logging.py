@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+from pathlib import Path
 
 
 class JsonFormatter(logging.Formatter):
@@ -20,7 +21,7 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def configure_request_logging(level: str) -> logging.Logger:
+def configure_request_logging(level: str, log_file: Path | None = None) -> logging.Logger:
     logger = logging.getLogger("logpresso.request")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
@@ -28,4 +29,9 @@ def configure_request_logging(level: str) -> logging.Logger:
         handler = logging.StreamHandler()
         handler.setFormatter(JsonFormatter())
         logger.addHandler(handler)
+        if log_file is not None:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setFormatter(JsonFormatter())
+            logger.addHandler(file_handler)
     return logger

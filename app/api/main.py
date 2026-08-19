@@ -9,7 +9,7 @@ from app.core.logging import configure_request_logging
 from app.services.metrics_store import MetricsStore
 
 
-logger = configure_request_logging(settings.log_level)
+logger = configure_request_logging(settings.log_level, settings.log_file)
 
 
 def create_app() -> FastAPI:

@@ -38,6 +38,10 @@ class Settings:
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}
     # Optional shared-deployment boundary. Leave unset for local single-user use.
     management_api_key: str | None = os.getenv("MANAGEMENT_API_KEY") or None
+    ui_auth_enabled: bool = os.getenv("UI_AUTH_ENABLED", "false").lower() in {"1", "true", "yes"}
+    ui_users_json: str = os.getenv("UI_USERS_JSON", "{}")
+    session_idle_minutes: int = max(5, int(os.getenv("SESSION_IDLE_MINUTES", "60")))
+    log_file: Path = Path(os.getenv("LOG_FILE", str(data_dir / "logs" / "app.jsonl")))
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     cors_allowed_origins: tuple[str, ...] = tuple(
         origin.strip()
