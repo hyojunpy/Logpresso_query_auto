@@ -1,4 +1,4 @@
-https://{$UI_BIND_ADDRESS}:8443 {
+https://{$UI_BIND_ADDRESS}:9443 {
     tls internal
     encode zstd gzip
     reverse_proxy ui:8501

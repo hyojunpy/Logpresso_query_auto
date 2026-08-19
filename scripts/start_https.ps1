@@ -15,5 +15,5 @@ $certDir = Join-Path $repo ".docker-dev\certificates"
 New-Item -ItemType Directory -Path $certDir -Force | Out-Null
 & $docker compose -f docker-compose.yml -f docker-compose.https.yml cp `
     caddy:/data/caddy/pki/authorities/local/root.crt "$certDir\logpresso-local-ca.crt"
-Write-Host "HTTPS UI: https://${bindAddress}:8443/"
+Write-Host "HTTPS UI: https://${bindAddress}:9443/"
 Write-Host "CA 인증서: $certDir\logpresso-local-ca.crt (신뢰 저장소 설치는 배포 문서를 확인하세요.)"
