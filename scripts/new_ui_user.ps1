@@ -15,7 +15,7 @@ $salt = New-Object byte[] 16
 $iterations = 200000
 $derive = [Security.Cryptography.Rfc2898DeriveBytes]::new($password, $salt, $iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
 try { $digest = $derive.GetBytes(32) } finally { $derive.Dispose() }
-$encoded = "pbkdf2_sha256`$$iterations`$([Convert]::ToBase64String($salt))`$([Convert]::ToBase64String($digest))"
+$encoded = 'pbkdf2_sha256$' + $iterations + '$' + [Convert]::ToBase64String($salt) + '$' + [Convert]::ToBase64String($digest)
 
 $lines = if (Test-Path $envFile) { [Collections.Generic.List[string]](Get-Content $envFile) } else { [Collections.Generic.List[string]]::new() }
 $users = @{}

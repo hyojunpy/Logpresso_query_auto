@@ -60,6 +60,12 @@
 - `RUN_BROWSER_TESTS=1 python -m pytest tests/test_streamlit_browser.py -q`
 - `docker compose config --quiet`
 - Start Compose with a disposable data directory and verify API/UI health.
+# v0.1.7
+
+- Fixed PowerShell PBKDF2 hash serialization so passwords created by
+  `new_ui_user.ps1` authenticate correctly.
+- Added a regression check for the password-hash construction syntax.
+
 # v0.1.6
 
 - Fixed the Caddy healthcheck to use the configured LAN certificate address and

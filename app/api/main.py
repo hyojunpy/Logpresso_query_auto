@@ -15,7 +15,7 @@ logger = configure_request_logging(settings.log_level, settings.log_file)
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Logpresso Natural Language Query Assistant",
-        version="0.1.6",
+        version="0.1.7",
         description="Generate validated Logpresso queries from Korean natural language requests.",
     )
     if settings.cors_allowed_origins:
