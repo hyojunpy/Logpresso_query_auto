@@ -37,3 +37,22 @@ def test_login_attempt_lockout_and_clear(tmp_path):
     assert store.locked_seconds("alice", now=now) > 0
     store.clear("alice")
     assert store.locked_seconds("alice", now=now) == 0
+
+
+def test_persistent_users_password_unlock_and_audit(tmp_path):
+    store = LoginAttemptStore(tmp_path / "auth.db", max_failures=1)
+    original = hash_password("old", iterations=1_000)
+    store.seed_users({"admin": load_users('{"admin":"' + original + '"}')["admin"]})
+    # Environment seeding must not overwrite changes made in the UI.
+    changed = hash_password("new", iterations=1_000)
+    store.set_password("admin", changed, actor="admin")
+    store.seed_users({"admin": load_users('{"admin":"' + original + '"}')["admin"]})
+    assert verify_password("new", store.users()["admin"].password_hash)
+
+    store.save_user("analyst", hash_password("pw", iterations=1_000), "viewer", actor="admin")
+    assert store.users()["analyst"].role == "viewer"
+    store.record_failure("analyst")
+    assert store.locked_seconds("analyst") > 0
+    store.unlock("analyst", actor="admin")
+    assert store.locked_seconds("analyst") == 0
+    assert [event.action for event in store.recent_events()] == ["account_unlocked", "user_saved", "password_changed"]

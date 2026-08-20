@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from app.core.config import settings
-from app.core.ui_auth import LoginAttemptStore, authenticate, load_users, session_expired
+from app.core.ui_auth import LoginAttemptStore, authenticate, hash_password, load_users, session_expired, verify_password
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
@@ -51,6 +51,8 @@ def require_login() -> None:
         st.stop()
     now = datetime.now(timezone.utc)
     attempt_store = LoginAttemptStore(settings.auth_db_path, settings.auth_max_failures, settings.auth_lockout_minutes)
+    attempt_store.seed_users(users)
+    users = attempt_store.users()
     if st.session_state.get("authenticated") and session_expired(
         st.session_state.get("auth_last_seen"), settings.session_idle_minutes, now=now
     ):
@@ -62,6 +64,7 @@ def require_login() -> None:
         with st.sidebar:
             st.caption(f"사용자: {st.session_state['auth_username']} ({st.session_state['auth_role']})")
             if st.button("로그아웃", key="logout_button"):
+                attempt_store.record_event("logout", st.session_state["auth_username"], st.session_state["auth_username"])
                 for key in list(st.session_state):
                     del st.session_state[key]
                 st.rerun()
@@ -79,6 +82,7 @@ def require_login() -> None:
             result = authenticate(username, password, users)
         if not locked_seconds and result.ok:
             attempt_store.clear(username)
+            attempt_store.record_event("login_success", result.username or username, result.username or username)
             st.session_state["authenticated"] = True
             st.session_state["auth_username"] = result.username
             st.session_state["auth_role"] = result.role
@@ -86,6 +90,7 @@ def require_login() -> None:
             st.rerun()
         if not locked_seconds:
             newly_locked = attempt_store.record_failure(username, now=now)
+            attempt_store.record_event("account_locked" if newly_locked else "login_failure", username)
             if newly_locked:
                 st.error(f"로그인 실패 횟수를 초과해 {settings.auth_lockout_minutes}분 동안 잠겼습니다.")
             else:
@@ -98,6 +103,66 @@ require_login()
 
 def has_role(*roles: str) -> bool:
     return not settings.ui_auth_enabled or st.session_state.get("auth_role") in roles
+
+
+def render_account_management() -> None:
+    if not settings.ui_auth_enabled:
+        return
+    store = LoginAttemptStore(settings.auth_db_path, settings.auth_max_failures, settings.auth_lockout_minutes)
+    username = st.session_state["auth_username"]
+    with st.sidebar.expander("내 비밀번호 변경"):
+        with st.form("change_own_password"):
+            current = st.text_input("현재 비밀번호", type="password")
+            new = st.text_input("새 비밀번호", type="password")
+            confirm = st.text_input("새 비밀번호 확인", type="password")
+            change = st.form_submit_button("비밀번호 변경")
+        if change:
+            account = store.users().get(username)
+            if not account or not verify_password(current, account.password_hash):
+                st.error("현재 비밀번호가 올바르지 않습니다.")
+            elif len(new) < 8:
+                st.error("새 비밀번호는 8자 이상이어야 합니다.")
+            elif new != confirm:
+                st.error("새 비밀번호 확인이 일치하지 않습니다.")
+            else:
+                store.set_password(username, hash_password(new), actor=username)
+                st.success("비밀번호를 변경했습니다.")
+    if not has_role("admin"):
+        return
+    with st.sidebar.expander("사용자 계정 관리"):
+        accounts = store.users(include_disabled=True)
+        st.dataframe(
+            [{"사용자": name, "권한": account.role, "활성": account.enabled} for name, account in accounts.items()],
+            use_container_width=True,
+            hide_index=True,
+        )
+        with st.form("save_ui_user"):
+            target = st.text_input("사용자 이름")
+            role = st.selectbox("권한", ["viewer", "editor", "admin"])
+            password = st.text_input("새 비밀번호", type="password", help="기존 계정도 새 비밀번호를 입력해야 저장됩니다.")
+            save = st.form_submit_button("계정 생성/수정")
+        if save:
+            if len(password) < 8:
+                st.error("비밀번호는 8자 이상이어야 합니다.")
+            else:
+                try:
+                    store.save_user(target, hash_password(password), role, actor=username)
+                except ValueError as error:
+                    st.error(str(error))
+                else:
+                    st.success("계정을 저장했습니다.")
+                    st.rerun()
+        unlock_target = st.selectbox("잠금 해제할 사용자", list(accounts), key="unlock_ui_user")
+        if st.button("계정 잠금 해제", key="unlock_ui_user_button"):
+            store.unlock(unlock_target, actor=username)
+            st.success("로그인 잠금을 해제했습니다.")
+        with st.expander("로그인/계정 감사 로그"):
+            st.dataframe(
+                [event.__dict__ for event in store.recent_events(100)], use_container_width=True, hide_index=True
+            )
+
+
+render_account_management()
 
 index = DocumentIndex(settings.db_path)
 status = index.status(settings.doc_path)
