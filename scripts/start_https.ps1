@@ -4,9 +4,10 @@ $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 $env:COMPOSE_PROJECT_NAME = "logpresso-dev"
 $env:LOGPRESSO_DATA_DIR = ".docker-dev"
+$binding = & (Join-Path $PSScriptRoot "sync_lan_bind.ps1")
 $docker = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
 if (-not (Test-Path $docker)) { $docker = (Get-Command docker).Source }
-$bindAddress = ((Get-Content (Join-Path $repo ".env") | Where-Object { $_ -like "UI_BIND_ADDRESS=*" } | Select-Object -First 1) -split "=", 2)[1]
+$bindAddress = $binding.Address
 $args = @("compose", "-f", "docker-compose.yml", "-f", "docker-compose.https.yml", "up", "-d")
 if ($Build) { $args += "--build" }
 & $docker @args

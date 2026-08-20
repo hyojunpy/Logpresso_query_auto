@@ -1,33 +1,25 @@
-param([switch]$DisableFirewall)
+param([switch]$FirewallOnly, [switch]$DisableFirewall)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
-$envFile = Join-Path $repo ".env"
-$route = Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Sort-Object RouteMetric | Select-Object -First 1
-$address = Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 |
-    Where-Object { $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1
-if (-not $address) { throw "활성 LAN IPv4 주소를 찾지 못했습니다." }
-$ip = $address.IPAddress
-$prefix = $address.PrefixLength
-
-$values = @{}
-if (Test-Path $envFile) {
-    foreach ($line in Get-Content $envFile) {
-        if ($line -match '^([^#=]+)=(.*)$') { $values[$matches[1].Trim()] = $matches[2] }
-    }
+if (-not $FirewallOnly) {
+    $binding = & (Join-Path $PSScriptRoot "sync_lan_bind.ps1")
+    Write-Host "LAN UI: http://$($binding.Address):8501/"
 }
-$values["API_BIND_ADDRESS"] = "127.0.0.1"
-$values["UI_BIND_ADDRESS"] = $ip
-$content = $values.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
-Set-Content -LiteralPath $envFile -Value $content -Encoding utf8
 
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = [Security.Principal.WindowsPrincipal]::new($identity)
+$isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    $switches = if ($DisableFirewall) { "-FirewallOnly -DisableFirewall" } else { "-FirewallOnly" }
+    $process = Start-Process powershell.exe -Verb RunAs -ArgumentList `
+        "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $switches" -Wait -PassThru
+    if ($process.ExitCode -ne 0) { throw "관리자 방화벽 설정에 실패했습니다." }
+    exit
+}
 $rule = "Logpresso Query UI (Private LAN)"
-$remote = "$ip/$prefix"
-if ($DisableFirewall) {
-    Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
-} else {
-    Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
+if (-not $DisableFirewall) {
     New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow -Protocol TCP `
-        -LocalAddress $ip -LocalPort 8501 -RemoteAddress $remote | Out-Null
+        -LocalPort 8501,9443 -RemoteAddress LocalSubnet | Out-Null
+    Write-Host "방화벽에서 현재 로컬 서브넷의 TCP 8501, 9443을 허용했습니다."
 }
-Write-Host "LAN UI: http://${ip}:8501/"
-Write-Host "설정을 적용하려면 scripts/start_dev.ps1 를 실행하세요."

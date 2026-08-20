@@ -41,3 +41,15 @@ def test_ui_user_script_builds_a_standard_pbkdf2_hash() -> None:
 
     assert "'pbkdf2_sha256$' + $iterations + '$'" in script
     assert '"pbkdf2_sha256`$$iterations' not in script
+
+
+def test_start_scripts_sync_lan_binding_and_clean_stale_https_container() -> None:
+    start_dev = (ROOT / "scripts" / "start_dev.ps1").read_text(encoding="utf-8")
+    start_https = (ROOT / "scripts" / "start_https.ps1").read_text(encoding="utf-8")
+    configure_lan = (ROOT / "scripts" / "configure_lan.ps1").read_text(encoding="utf-8")
+
+    assert "sync_lan_bind.ps1" in start_dev
+    assert "sync_lan_bind.ps1" in start_https
+    assert 'rm -f "${env:COMPOSE_PROJECT_NAME}-caddy-1"' in start_dev
+    assert "-RemoteAddress LocalSubnet" in configure_lan
+    assert "-LocalPort 8501,9443" in configure_lan
