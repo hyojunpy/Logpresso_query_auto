@@ -60,6 +60,13 @@
 - `RUN_BROWSER_TESTS=1 python -m pytest tests/test_streamlit_browser.py -q`
 - `docker compose config --quiet`
 - Start Compose with a disposable data directory and verify API/UI health.
+# v0.1.8
+
+- Added automatic active-LAN IPv4 detection before HTTP and HTTPS startup.
+- Changed the Windows firewall boundary to `LocalSubnet` on ports 8501 and
+  9443 so DHCP address changes do not require rule replacement.
+- Removed stale Caddy containers when returning to HTTP-only development mode.
+
 # v0.1.7
 
 - Fixed PowerShell PBKDF2 hash serialization so passwords created by
