@@ -34,3 +34,10 @@ def test_deployment_configuration_has_healthchecks_and_tag_releases() -> None:
     assert "python -m pytest" in release
     assert "gh release create" in release
     assert "contents: write" in release
+
+
+def test_ui_user_script_builds_a_standard_pbkdf2_hash() -> None:
+    script = (ROOT / "scripts" / "new_ui_user.ps1").read_text(encoding="utf-8")
+
+    assert "'pbkdf2_sha256$' + $iterations + '$'" in script
+    assert '"pbkdf2_sha256`$$iterations' not in script
