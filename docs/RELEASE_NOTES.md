@@ -60,6 +60,13 @@
 - `RUN_BROWSER_TESTS=1 python -m pytest tests/test_streamlit_browser.py -q`
 - `docker compose config --quiet`
 - Start Compose with a disposable data directory and verify API/UI health.
+# v0.1.9
+
+- 웹에서 사용자 계정을 생성하거나 권한과 비밀번호를 변경할 수 있습니다.
+- 모든 사용자가 자신의 비밀번호를 변경할 수 있고, 관리자는 잠긴 계정을 즉시 해제할 수 있습니다.
+- 사용자 변경 사항을 재시작 후에도 유지하며 환경 변수 계정은 최초 실행 시 안전하게 이관합니다.
+- 로그인 성공·실패·잠금·로그아웃과 계정 변경 감사 로그를 원문 비밀번호 없이 기록합니다.
+
 # v0.1.8
 
 - Added automatic active-LAN IPv4 detection before HTTP and HTTPS startup.

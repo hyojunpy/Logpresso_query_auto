@@ -19,6 +19,8 @@ class Settings:
     metrics_db_path: Path = data_dir / "metrics.db"
     metrics_retention_days: int = max(1, int(os.getenv("METRICS_RETENTION_DAYS", "30")))
     catalog_path: Path = data_dir / "catalog.json"
+    store_schema_path: Path = data_dir / "store-schema.json"
+    store_table_mapping_path: Path = data_dir / "store-table-mappings.json"
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")

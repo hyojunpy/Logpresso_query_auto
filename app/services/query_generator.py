@@ -4,7 +4,7 @@ import json
 import re
 
 from app.core.config import settings
-from app.models.request import GenerateQueryRequest, QueryIntent
+from app.models.request import FilterCondition, GenerateQueryRequest, QueryIntent
 from app.models.response import ExecutionPreview, GenerateQueryResponse, QueryExplanation
 from app.services.citation_service import references_for_query_parts, references_from_results
 from app.services.intent_parser import DENY_WORDS, ERROR_WORDS, IntentParser
@@ -18,6 +18,8 @@ from app.services.catalog_service import CatalogService
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.alias_store import AliasStore
+from app.services.store_schema_knowledge import StoreSchemaKnowledge
+from app.services.store_table_mapping import StoreTableMapping
 
 
 class QueryGenerator:
@@ -43,8 +45,40 @@ class QueryGenerator:
         )
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
+        store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
+        store_match = store_knowledge.match(
+            payload.request, payload.context.store_product, payload.context.store_schema
+        )
+        mapped_table = StoreTableMapping(settings.store_table_mapping_path).resolve(
+            store_match.product if store_match else payload.context.store_product,
+            store_match.schema_name if store_match else payload.context.store_schema,
+        )
+        if mapped_table:
+            context = payload.context.model_copy(deep=True)
+            context.known_tables = list(dict.fromkeys([mapped_table, *context.known_tables]))
+            request = payload.request
+            if mapped_table not in request:
+                request = f"{mapped_table} 테이블에서 {request}"
+            payload = payload.model_copy(update={"request": request, "context": context})
+        payload = store_knowledge.enrich(payload)
         payload = self._with_business_aliases(payload)
         intent = self.intent_parser.parse(payload)
+        if store_match and store_match.discriminator_field and store_match.log_types:
+            field = store_match.discriminator_field
+            if not any(item.field == field for item in intent.filters):
+                intent.filters[0:0] = [
+                    FilterCondition(
+                        field=field,
+                        value=value,
+                        value_type=(
+                            "number"
+                            if field == "module_flag" and re.fullmatch(r"-?\d+(?:\.\d+)?", value)
+                            else "string"
+                        ),
+                        conjunction="and" if index == 0 else "or",
+                    )
+                    for index, value in enumerate(store_match.log_types)
+                ]
         search_text = f"{payload.request} table logger stream fulltext search stats rollup timechart eval fields rename join first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:

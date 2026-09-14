@@ -1258,6 +1258,13 @@ class IntentParser:
             aggregations.append(Aggregation(function="sum", field="failure_count", alias="sum_failure_count"))
         if (
             (any(word in text for word in COUNT_ONLY_WORDS) and not conditional_failure)
+            or (
+                "집계" in text
+                and any(
+                    re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])\s*(?:별|별로)", text)
+                    for field in known_fields
+                )
+            )
             or re.search(r"\d+\s*건\s*(?:이상|초과|이하|미만)", text)
             or any(phrase in text for phrase in ("많이 나온", "적게 나온", "가장 많이", "가장 적게"))
             or self._looks_like_ratio(text)

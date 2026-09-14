@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from app.core.config import settings
-from app.core.ui_auth import LoginAttemptStore, authenticate, load_users, session_expired
+from app.core.ui_auth import LoginAttemptStore, authenticate, hash_password, load_users, session_expired, verify_password
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
@@ -28,6 +28,9 @@ from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
 from app.services.ollama_status import check_ollama
 from app.services.metrics_store import MetricsStore, metric_label, operational_overview
+from app.services.store_schema_knowledge import StoreSchemaKnowledge
+from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
+from app.services.store_table_mapping import StoreTableMapping
 try:
     # Package import when tests or Python load the app from the repository root.
     from ui.quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
@@ -51,6 +54,8 @@ def require_login() -> None:
         st.stop()
     now = datetime.now(timezone.utc)
     attempt_store = LoginAttemptStore(settings.auth_db_path, settings.auth_max_failures, settings.auth_lockout_minutes)
+    attempt_store.seed_users(users)
+    users = attempt_store.users()
     if st.session_state.get("authenticated") and session_expired(
         st.session_state.get("auth_last_seen"), settings.session_idle_minutes, now=now
     ):
@@ -62,6 +67,7 @@ def require_login() -> None:
         with st.sidebar:
             st.caption(f"사용자: {st.session_state['auth_username']} ({st.session_state['auth_role']})")
             if st.button("로그아웃", key="logout_button"):
+                attempt_store.record_event("logout", st.session_state["auth_username"], st.session_state["auth_username"])
                 for key in list(st.session_state):
                     del st.session_state[key]
                 st.rerun()
@@ -79,6 +85,7 @@ def require_login() -> None:
             result = authenticate(username, password, users)
         if not locked_seconds and result.ok:
             attempt_store.clear(username)
+            attempt_store.record_event("login_success", result.username or username, result.username or username)
             st.session_state["authenticated"] = True
             st.session_state["auth_username"] = result.username
             st.session_state["auth_role"] = result.role
@@ -86,6 +93,7 @@ def require_login() -> None:
             st.rerun()
         if not locked_seconds:
             newly_locked = attempt_store.record_failure(username, now=now)
+            attempt_store.record_event("account_locked" if newly_locked else "login_failure", username)
             if newly_locked:
                 st.error(f"로그인 실패 횟수를 초과해 {settings.auth_lockout_minutes}분 동안 잠겼습니다.")
             else:
@@ -99,9 +107,71 @@ require_login()
 def has_role(*roles: str) -> bool:
     return not settings.ui_auth_enabled or st.session_state.get("auth_role") in roles
 
+
+def render_account_management() -> None:
+    if not settings.ui_auth_enabled:
+        return
+    store = LoginAttemptStore(settings.auth_db_path, settings.auth_max_failures, settings.auth_lockout_minutes)
+    username = st.session_state["auth_username"]
+    with st.sidebar.expander("내 비밀번호 변경"):
+        with st.form("change_own_password"):
+            current = st.text_input("현재 비밀번호", type="password")
+            new = st.text_input("새 비밀번호", type="password")
+            confirm = st.text_input("새 비밀번호 확인", type="password")
+            change = st.form_submit_button("비밀번호 변경")
+        if change:
+            account = store.users().get(username)
+            if not account or not verify_password(current, account.password_hash):
+                st.error("현재 비밀번호가 올바르지 않습니다.")
+            elif len(new) < 8:
+                st.error("새 비밀번호는 8자 이상이어야 합니다.")
+            elif new != confirm:
+                st.error("새 비밀번호 확인이 일치하지 않습니다.")
+            else:
+                store.set_password(username, hash_password(new), actor=username)
+                st.success("비밀번호를 변경했습니다.")
+    if not has_role("admin"):
+        return
+    with st.sidebar.expander("사용자 계정 관리"):
+        accounts = store.users(include_disabled=True)
+        st.dataframe(
+            [{"사용자": name, "권한": account.role, "활성": account.enabled} for name, account in accounts.items()],
+            use_container_width=True,
+            hide_index=True,
+        )
+        with st.form("save_ui_user"):
+            target = st.text_input("사용자 이름")
+            role = st.selectbox("권한", ["viewer", "editor", "admin"])
+            password = st.text_input("새 비밀번호", type="password", help="기존 계정도 새 비밀번호를 입력해야 저장됩니다.")
+            save = st.form_submit_button("계정 생성/수정")
+        if save:
+            if len(password) < 8:
+                st.error("비밀번호는 8자 이상이어야 합니다.")
+            else:
+                try:
+                    store.save_user(target, hash_password(password), role, actor=username)
+                except ValueError as error:
+                    st.error(str(error))
+                else:
+                    st.success("계정을 저장했습니다.")
+                    st.rerun()
+        unlock_target = st.selectbox("잠금 해제할 사용자", list(accounts), key="unlock_ui_user")
+        if st.button("계정 잠금 해제", key="unlock_ui_user_button"):
+            store.unlock(unlock_target, actor=username)
+            st.success("로그인 잠금을 해제했습니다.")
+        with st.expander("로그인/계정 감사 로그"):
+            st.dataframe(
+                [event.__dict__ for event in store.recent_events(100)], use_container_width=True, hide_index=True
+            )
+
+
+render_account_management()
+
 index = DocumentIndex(settings.db_path)
 status = index.status(settings.doc_path)
 catalog_service = CatalogService(settings.catalog_path)
+store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
+store_mapping = StoreTableMapping(settings.store_table_mapping_path)
 
 
 def load_uploaded_catalog(uploaded_file) -> Catalog | None:
@@ -244,6 +314,90 @@ with st.sidebar:
     known_fields = st.text_area("필드 힌트 (선택)", placeholder="예: src_ip\naction\n_time")
     known_loggers = st.text_area("logger 힌트 (선택)", placeholder="예: local\\firewall_logger")
     known_streams = st.text_area("stream 힌트 (선택)", placeholder="예: firewall_stream")
+    selected_store_product = ""
+    selected_store_schema = ""
+    mapped_store_table = None
+    with st.expander("Logpresso Store 스키마", expanded=False):
+        store_status = store_knowledge.status()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("제품", store_status.get("products", 0))
+        col2.metric("스키마", store_status.get("schemas", 0))
+        col3.metric("상세 필드", store_status.get("fields", 0))
+        st.caption(
+            f"버전 {store_status.get('version') or '미지정'} · Raw 형식 {store_status.get('raw_formats', 0)}개 · "
+            f"필드 미공개 스키마 {store_status.get('schemas_without_fields', 0)}개"
+        )
+        store_search = st.text_input("제품·스키마 검색", placeholder="예: 포티게이트, 웹필터, SQL 감사")
+        search_results = store_knowledge.search(store_search, 30) if store_search.strip() else []
+        if search_results:
+            st.dataframe(search_results, use_container_width=True, hide_index=True)
+        products = store_knowledge.payload.get("products", [])
+        filtered_products = list(dict.fromkeys(item["product"] for item in search_results)) if search_results else [
+            str(item.get("name")) for item in products
+        ]
+        selected_store_product = st.selectbox("Store 제품", [""] + filtered_products)
+        selected_product_data = next(
+            (item for item in products if item.get("name") == selected_store_product), None
+        )
+        schema_options = [str(item.get("name")) for item in (selected_product_data or {}).get("schemas", [])]
+        selected_store_schema = st.selectbox("Store 스키마", [""] + schema_options)
+        mapped_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+        mapping_table = st.text_input(
+            "실제 Logpresso 테이블",
+            value=mapped_store_table or "",
+            placeholder="예: waf_events",
+        )
+        product_default = st.checkbox("제품 전체 기본 테이블로 저장", value=not bool(selected_store_schema))
+        if st.button("테이블 매핑 저장", disabled=not selected_store_product or not has_role("editor", "admin")):
+            try:
+                store_mapping.save(
+                    selected_store_product,
+                    mapping_table,
+                    None if product_default else selected_store_schema or None,
+                )
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success("테이블 매핑을 저장했습니다.")
+                st.rerun()
+        mappings = store_mapping.list()
+        if mappings:
+            st.dataframe(mappings, use_container_width=True, hide_index=True)
+
+        store_file = st.file_uploader("Store 카탈로그 Excel 업데이트", type=["xlsx"], key="store_schema_xlsx")
+        if store_file is not None:
+            updater = StoreSchemaUpdate(settings.store_schema_path)
+            try:
+                candidate = updater.parse_xlsx(store_file.getvalue(), store_file.name)
+                comparison = updater.compare(
+                    updater.current(StoreSchemaKnowledge.bundled().payload), candidate
+                )
+            except StoreSchemaUpdateError as error:
+                st.error(str(error))
+            else:
+                st.json(comparison)
+                confirmed = st.checkbox("변경 내역을 확인했습니다.", key="store_schema_apply_confirmed")
+                if st.button(
+                    "Store 카탈로그 적용",
+                    disabled=not confirmed or not has_role("admin"),
+                ):
+                    updater.save(candidate)
+                    st.success("Store 카탈로그를 적용하고 이전 파일을 백업했습니다.")
+                    st.rerun()
+
+        raw_formats = (selected_product_data or {}).get("raw_formats", [])
+        if raw_formats:
+            raw_type = st.selectbox("Raw 로그 유형", [str(item.get("log_type")) for item in raw_formats])
+            raw_line = st.text_area("Raw Syslog 샘플", key="store_raw_sample")
+            if st.button("Raw 형식 검증") and raw_line:
+                raw_result = store_knowledge.validate_raw(selected_store_product, raw_type, raw_line)
+                if raw_result.get("valid"):
+                    st.success(f"필드 수 {raw_result['actual_fields']}개가 공개 형식과 일치합니다.")
+                else:
+                    st.warning(
+                        f"예상 {raw_result.get('expected_fields', 0)}개 / 실제 {raw_result.get('actual_fields', 0)}개"
+                    )
+                st.json(raw_result)
     with st.expander("업무 별칭 관리"):
         alias_store = AliasStore(settings.db_path)
         alias_file = st.file_uploader("별칭 CSV 가져오기", type=["csv"], key="alias_csv_import")
@@ -564,6 +718,8 @@ def current_context() -> RequestContext:
     return RequestContext(
         product=product,
         version=version or None,
+        store_product=selected_store_product or None,
+        store_schema=selected_store_schema or None,
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_tables.split(",") if value.strip()]

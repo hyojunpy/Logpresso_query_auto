@@ -24,6 +24,15 @@ class AuthResult:
 class UserAccount:
     password_hash: str
     role: str = "viewer"
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class AuthEvent:
+    timestamp: str
+    action: str
+    username: str
+    actor: str
 
 
 def hash_password(password: str, *, salt: bytes | None = None, iterations: int = PBKDF2_ITERATIONS) -> str:
@@ -93,7 +102,73 @@ class LoginAttemptStore:
         conn.execute(
             "create table if not exists login_attempt (username text primary key, failures integer not null, locked_until text)"
         )
+        conn.execute(
+            "create table if not exists ui_user (username text primary key, password_hash text not null, "
+            "role text not null, enabled integer not null default 1, created_at text not null, updated_at text not null)"
+        )
+        conn.execute(
+            "create table if not exists auth_event (id integer primary key autoincrement, timestamp text not null, "
+            "action text not null, username text not null, actor text not null)"
+        )
         return conn
+
+    def seed_users(self, users: dict[str, UserAccount]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.executemany(
+                "insert or ignore into ui_user(username,password_hash,role,enabled,created_at,updated_at) "
+                "values (?, ?, ?, ?, ?, ?)",
+                [(name, account.password_hash, account.role, int(account.enabled), now, now) for name, account in users.items()],
+            )
+
+    def users(self, *, include_disabled: bool = False) -> dict[str, UserAccount]:
+        where = "" if include_disabled else " where enabled = 1"
+        with self._connect() as conn:
+            rows = conn.execute("select username,password_hash,role,enabled from ui_user" + where + " order by username").fetchall()
+        return {row[0]: UserAccount(password_hash=row[1], role=row[2], enabled=bool(row[3])) for row in rows}
+
+    def save_user(self, username: str, password_hash: str, role: str, *, actor: str) -> None:
+        normalized = username.strip()
+        if not normalized or role not in {"viewer", "editor", "admin"} or not password_hash:
+            raise ValueError("username, password_hash and a valid role are required")
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "insert into ui_user(username,password_hash,role,enabled,created_at,updated_at) values (?, ?, ?, 1, ?, ?) "
+                "on conflict(username) do update set password_hash=excluded.password_hash, role=excluded.role, "
+                "enabled=1, updated_at=excluded.updated_at",
+                (normalized, password_hash, role, now, now),
+            )
+        self.record_event("user_saved", normalized, actor)
+
+    def set_password(self, username: str, password_hash: str, *, actor: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            result = conn.execute(
+                "update ui_user set password_hash = ?, updated_at = ? where username = ?",
+                (password_hash, now, username.strip()),
+            )
+            if result.rowcount != 1:
+                raise ValueError("user not found")
+        self.record_event("password_changed", username.strip(), actor)
+
+    def unlock(self, username: str, *, actor: str) -> None:
+        self.clear(username)
+        self.record_event("account_unlocked", username.strip(), actor)
+
+    def record_event(self, action: str, username: str, actor: str = "system") -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "insert into auth_event(timestamp,action,username,actor) values (?, ?, ?, ?)",
+                (datetime.now(timezone.utc).isoformat(), action, username.strip() or "<empty>", actor),
+            )
+
+    def recent_events(self, limit: int = 100) -> list[AuthEvent]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "select timestamp,action,username,actor from auth_event order by id desc limit ?", (max(1, limit),)
+            ).fetchall()
+        return [AuthEvent(*row) for row in rows]
 
     def locked_seconds(self, username: str, *, now: datetime | None = None) -> int:
         current = now or datetime.now(timezone.utc)
