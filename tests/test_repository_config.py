@@ -43,6 +43,12 @@ def test_ui_user_script_builds_a_standard_pbkdf2_hash() -> None:
     assert '"pbkdf2_sha256`$$iterations' not in script
 
 
+def test_runtime_schema_builder_is_included_in_installed_package() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'include = ["app*", "scripts*"]' in pyproject
+    assert (ROOT / "scripts" / "__init__.py").exists()
+
+
 def test_start_scripts_sync_lan_binding_and_clean_stale_https_container() -> None:
     start_dev = (ROOT / "scripts" / "start_dev.ps1").read_text(encoding="utf-8")
     start_https = (ROOT / "scripts" / "start_https.ps1").read_text(encoding="utf-8")
