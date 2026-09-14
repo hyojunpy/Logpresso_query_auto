@@ -109,3 +109,30 @@ def test_raw_backtick_and_whitespace_formats_are_supported():
     result = knowledge.validate_raw("ePrism SSL VA", ssl["log_type"], " ".join(["x"] * count))
     assert result["valid"] is True
     assert result["delimiter"] == "whitespace"
+
+
+def test_raw_detection_ranks_exact_public_format_first():
+    knowledge = StoreSchemaKnowledge.bundled()
+    product = next(item for item in knowledge.payload["products"] if item["name"] == "AIWAF")
+    template = next(item for item in product["raw_formats"] if item["log_type"] == "AUDIT")["template"]
+    raw_line = "AUDIT|" + "|".join(["value"] * (len(template.split("|")) - 1))
+
+    candidates = knowledge.detect_raw(raw_line)
+
+    assert candidates[0]["product"] == "AIWAF"
+    assert candidates[0]["log_type"] == "AUDIT"
+    assert candidates[0]["valid"] is True
+
+
+def test_coverage_and_preflight_expose_operational_gaps():
+    knowledge = StoreSchemaKnowledge.bundled()
+    missing = knowledge.coverage(missing_only=True)
+    assert len(missing) == 316
+    assert all(item["field_count"] == 0 for item in missing)
+
+    blocked = knowledge.preflight("FortiGate", "FortiGate Webfilter", None)
+    assert blocked["ready"] is False
+    assert set(blocked["issues"]) == {"fields_unavailable", "table_mapping_missing"}
+
+    ready = knowledge.preflight("AIWAF", "AIWAF Alert", "aiwaf_events")
+    assert ready["ready"] is True

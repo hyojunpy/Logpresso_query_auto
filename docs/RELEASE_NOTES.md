@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.1.11 - 2026-09-15
+
+- Added CSV bulk import/export for real Store table mappings and schema readiness diagnostics.
+- Added coverage prioritization for 316 schemas without published fields.
+- Added privacy-safe, non-persistent Raw Syslog product/format candidate detection.
+- Added an explicit opt-in HTTPS dry-run verification adapter; external verification remains disabled by default.
+- Grouped Store controls as operations management and made HTTPS/backup scripts honor an explicitly selected data directory.
+
 ## 0.1.4 - 2026-08-18
 
 - Added 63 categorized quick-test requests with automatic sample table, stream, logger, and field hints.

@@ -317,7 +317,7 @@ with st.sidebar:
     selected_store_product = ""
     selected_store_schema = ""
     mapped_store_table = None
-    with st.expander("Logpresso Store 스키마", expanded=False):
+    with st.expander("운영 관리 · Logpresso Store 스키마", expanded=False):
         store_status = store_knowledge.status()
         col1, col2, col3 = st.columns(3)
         col1.metric("제품", store_status.get("products", 0))
@@ -363,6 +363,41 @@ with st.sidebar:
         mappings = store_mapping.list()
         if mappings:
             st.dataframe(mappings, use_container_width=True, hide_index=True)
+        st.download_button(
+            "테이블 매핑 CSV 다운로드",
+            store_mapping.export_csv(),
+            file_name="store-table-mappings.csv",
+            mime="text/csv",
+        )
+        mapping_file = st.file_uploader("테이블 매핑 CSV 일괄 등록", type=["csv"], key="store_mapping_csv")
+        if mapping_file is not None and st.button(
+            "매핑 CSV 적용", disabled=not has_role("editor", "admin")
+        ):
+            try:
+                imported_mappings = store_mapping.import_csv(mapping_file.getvalue())
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success(f"테이블 매핑 {len(imported_mappings)}개를 반영했습니다.")
+                st.rerun()
+
+        if selected_store_product:
+            readiness = store_knowledge.preflight(
+                selected_store_product, selected_store_schema or None, mapped_store_table
+            )
+            if readiness["ready"]:
+                st.success("선택한 스키마는 쿼리 생성 준비가 완료되었습니다.")
+            else:
+                issue_labels = {
+                    "fields_unavailable": "상세 필드 미공개",
+                    "table_mapping_missing": "실제 테이블 매핑 필요",
+                    "unknown_schema": "알 수 없는 스키마",
+                }
+                st.warning(" · ".join(issue_labels.get(item, item) for item in readiness["issues"]))
+
+        missing_coverage = store_knowledge.coverage(missing_only=True)
+        with st.expander(f"필드 미공개 우선 보강 목록 {len(missing_coverage)}개"):
+            st.dataframe(missing_coverage, use_container_width=True, hide_index=True)
 
         store_file = st.file_uploader("Store 카탈로그 Excel 업데이트", type=["xlsx"], key="store_schema_xlsx")
         if store_file is not None:
@@ -386,9 +421,19 @@ with st.sidebar:
                     st.rerun()
 
         raw_formats = (selected_product_data or {}).get("raw_formats", [])
+        raw_line = st.text_area(
+            "Raw Syslog 샘플",
+            key="store_raw_sample",
+            help="화면에서만 분석하며 자동 저장하지 않습니다. 제품을 선택하지 않아도 형식 후보를 찾습니다.",
+        )
+        if st.button("Raw 제품·형식 자동 판별", disabled=not raw_line):
+            detected = store_knowledge.detect_raw(raw_line, selected_store_product or None)
+            if detected:
+                st.dataframe(detected, use_container_width=True, hide_index=True)
+            else:
+                st.warning("비교할 수 있는 공개 Raw 양식이 없습니다.")
         if raw_formats:
             raw_type = st.selectbox("Raw 로그 유형", [str(item.get("log_type")) for item in raw_formats])
-            raw_line = st.text_area("Raw Syslog 샘플", key="store_raw_sample")
             if st.button("Raw 형식 검증") and raw_line:
                 raw_result = store_knowledge.validate_raw(selected_store_product, raw_type, raw_line)
                 if raw_result.get("valid"):

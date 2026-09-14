@@ -162,7 +162,11 @@ API를 사용하는 경우 다음 엔드포인트를 제공합니다.
 - `GET /api/v1/store-schema/status`: 카탈로그 버전과 커버리지
 - `GET /api/v1/store-schema/products`, `GET /api/v1/store-schema/search?q=...`: 목록과 검색
 - `GET|PUT /api/v1/store-schema/mappings`: 실제 테이블 매핑 조회·저장
+- `GET /api/v1/store-schema/mappings.csv`, `POST /api/v1/store-schema/mappings/import`: 매핑 CSV 내보내기·일괄 등록
+- `GET /api/v1/store-schema/coverage?missing_only=true`: 필드 미공개 스키마 우선 보강 목록
 - `POST /api/v1/store-schema/raw/validate`: 공개 Raw 양식 구조 검증
+- `POST /api/v1/store-schema/raw/detect`: Raw 로그의 제품·형식 후보 자동 판별
+- `GET /api/v1/store-schema/preflight`: 테이블·필드 준비 상태 진단
 - `POST /api/v1/store-schema/import/xlsx?apply=false`: Excel 변경 미리보기
 - `POST /api/v1/store-schema/import/xlsx?apply=true`: 검토한 Excel 적용
 
@@ -173,6 +177,8 @@ python scripts\build_store_schema_knowledge.py <Store-카탈로그.xlsx> app\res
 ```
 
 스키마 필드는 파싱 후 정규화된 필드입니다. 장비의 Raw Syslog 순서·구분자와 동일하다고 가정하지 않으며, 공개 Raw 형식이 없는 제품은 실제 장비 샘플로 최종 검증해야 합니다.
+
+실제 Logpresso 검증 전용 API가 준비된 환경에서는 `ENABLE_EXTERNAL_VERIFICATION=true`와 `LOGPRESSO_VERIFICATION_URL`을 명시적으로 설정할 수 있습니다. HTTPS(또는 localhost) 검증 전용 엔드포인트만 허용하며 `{ "query": "...", "dry_run": true }`만 전송합니다. 기본값은 비활성화이므로 고객 시스템에 연결하지 않습니다.
 
 ## 문서 인덱싱
 

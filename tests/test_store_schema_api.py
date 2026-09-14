@@ -45,6 +45,38 @@ def test_store_raw_validation_api():
     assert response.json()["reason"] == "field_count_mismatch"
 
 
+def test_store_coverage_detection_and_preflight_api(tmp_path):
+    mapping_path = Path(tmp_path) / "mappings.json"
+    with patch.object(settings, "store_table_mapping_path", mapping_path):
+        client = TestClient(app)
+        coverage = client.get("/api/v1/store-schema/coverage", params={"missing_only": "true"})
+        detected = client.post("/api/v1/store-schema/raw/detect", json={"raw_line": "AUDIT|a|b"})
+        preflight = client.get("/api/v1/store-schema/preflight", params={
+            "product": "FortiGate", "schema": "FortiGate Webfilter",
+        })
+
+    assert coverage.status_code == 200
+    assert len(coverage.json()["items"]) == 316
+    assert detected.status_code == 200
+    assert detected.json()["items"]
+    assert preflight.json()["issues"] == ["fields_unavailable", "table_mapping_missing"]
+
+
+def test_store_mapping_csv_api_round_trip(tmp_path):
+    mapping_path = Path(tmp_path) / "mappings.json"
+    db_path = Path(tmp_path) / "app.db"
+    with patch.object(settings, "store_table_mapping_path", mapping_path), patch.object(settings, "db_path", db_path):
+        client = TestClient(app)
+        imported = client.post("/api/v1/store-schema/mappings/import", files={
+            "file": ("mappings.csv", b"product,schema,table\nAIWAF,,aiwaf_events\n", "text/csv")
+        })
+        exported = client.get("/api/v1/store-schema/mappings.csv")
+
+    assert imported.status_code == 200
+    assert exported.status_code == 200
+    assert "AIWAF,,aiwaf_events" in exported.text
+
+
 def test_store_excel_import_preview_does_not_write(tmp_path):
     from tests.test_store_schema_update import catalog_workbook
 
