@@ -23,7 +23,7 @@ dependencies = [
 dev = ["pytest>=8.2", "playwright>=1.62"]
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "scripts*"]
 
 [tool.setuptools.package-data]
 "app.resources" = ["*.json"]
