@@ -19,6 +19,7 @@ from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.alias_store import AliasStore
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
+from app.services.store_table_mapping import StoreTableMapping
 
 
 class QueryGenerator:
@@ -44,8 +45,21 @@ class QueryGenerator:
         )
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
-        store_knowledge = StoreSchemaKnowledge.bundled()
-        store_match = store_knowledge.match(payload.request)
+        store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
+        store_match = store_knowledge.match(
+            payload.request, payload.context.store_product, payload.context.store_schema
+        )
+        mapped_table = StoreTableMapping(settings.store_table_mapping_path).resolve(
+            store_match.product if store_match else payload.context.store_product,
+            store_match.schema_name if store_match else payload.context.store_schema,
+        )
+        if mapped_table:
+            context = payload.context.model_copy(deep=True)
+            context.known_tables = list(dict.fromkeys([mapped_table, *context.known_tables]))
+            request = payload.request
+            if mapped_table not in request:
+                request = f"{mapped_table} 테이블에서 {request}"
+            payload = payload.model_copy(update={"request": request, "context": context})
         payload = store_knowledge.enrich(payload)
         payload = self._with_business_aliases(payload)
         intent = self.intent_parser.parse(payload)

@@ -8,6 +8,7 @@ from app.models.request import Catalog, CatalogField, CatalogTable, GenerateQuer
 from app.services.llm.mock_provider import MockProvider
 from app.services.query_generator import QueryGenerator
 from app.services.retriever import Retriever
+from app.services.store_table_mapping import StoreTableMapping
 from tests.support import shared_index
 
 
@@ -16,6 +17,35 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_generates_or_filter_for_schema_with_multiple_numeric_log_codes(self):
+        response = generator(MockProvider()).generate(GenerateQueryRequest(
+            request="최근 24시간 dpx_events에서 AhnLab DPX 차단 로그를 src_ip별로 집계해줘",
+            context=RequestContext(known_tables=["dpx_events"]),
+        ))
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("module_flag == 3031", response.query)
+        self.assertIn("module_flag == 3221", response.query)
+        self.assertIn(" or ", response.query)
+        self.assertIn("stats count by src_ip", response.query)
+
+    def test_uses_persisted_store_table_mapping_without_table_in_request(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            mapping_path = Path(directory) / "mappings.json"
+            StoreTableMapping(mapping_path).save("FortiGate", "fortigate_events")
+            with patch.object(settings, "store_table_mapping_path", mapping_path):
+                response = generator(MockProvider()).generate(GenerateQueryRequest(
+                    request="최근 24시간 FortiGate Webfilter의 src_ip별 건수를 보여줘",
+                    context=RequestContext(known_fields=["src_ip", "_time"]),
+                ))
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("table duration=24h fortigate_events", response.query)
+        self.assertIn("stats count by src_ip", response.query)
+
     def test_generates_secui_query_from_korean_schema_and_field_aliases(self):
         response = generator(MockProvider()).generate(
             GenerateQueryRequest(

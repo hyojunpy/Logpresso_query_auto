@@ -28,6 +28,9 @@ from app.services.query_suggestions import apply_safe_suggestion
 from app.services.query_history import append_version, query_diff
 from app.services.ollama_status import check_ollama
 from app.services.metrics_store import MetricsStore, metric_label, operational_overview
+from app.services.store_schema_knowledge import StoreSchemaKnowledge
+from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
+from app.services.store_table_mapping import StoreTableMapping
 try:
     # Package import when tests or Python load the app from the repository root.
     from ui.quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
@@ -167,6 +170,8 @@ render_account_management()
 index = DocumentIndex(settings.db_path)
 status = index.status(settings.doc_path)
 catalog_service = CatalogService(settings.catalog_path)
+store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
+store_mapping = StoreTableMapping(settings.store_table_mapping_path)
 
 
 def load_uploaded_catalog(uploaded_file) -> Catalog | None:
@@ -309,6 +314,90 @@ with st.sidebar:
     known_fields = st.text_area("필드 힌트 (선택)", placeholder="예: src_ip\naction\n_time")
     known_loggers = st.text_area("logger 힌트 (선택)", placeholder="예: local\\firewall_logger")
     known_streams = st.text_area("stream 힌트 (선택)", placeholder="예: firewall_stream")
+    selected_store_product = ""
+    selected_store_schema = ""
+    mapped_store_table = None
+    with st.expander("Logpresso Store 스키마", expanded=False):
+        store_status = store_knowledge.status()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("제품", store_status.get("products", 0))
+        col2.metric("스키마", store_status.get("schemas", 0))
+        col3.metric("상세 필드", store_status.get("fields", 0))
+        st.caption(
+            f"버전 {store_status.get('version') or '미지정'} · Raw 형식 {store_status.get('raw_formats', 0)}개 · "
+            f"필드 미공개 스키마 {store_status.get('schemas_without_fields', 0)}개"
+        )
+        store_search = st.text_input("제품·스키마 검색", placeholder="예: 포티게이트, 웹필터, SQL 감사")
+        search_results = store_knowledge.search(store_search, 30) if store_search.strip() else []
+        if search_results:
+            st.dataframe(search_results, use_container_width=True, hide_index=True)
+        products = store_knowledge.payload.get("products", [])
+        filtered_products = list(dict.fromkeys(item["product"] for item in search_results)) if search_results else [
+            str(item.get("name")) for item in products
+        ]
+        selected_store_product = st.selectbox("Store 제품", [""] + filtered_products)
+        selected_product_data = next(
+            (item for item in products if item.get("name") == selected_store_product), None
+        )
+        schema_options = [str(item.get("name")) for item in (selected_product_data or {}).get("schemas", [])]
+        selected_store_schema = st.selectbox("Store 스키마", [""] + schema_options)
+        mapped_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+        mapping_table = st.text_input(
+            "실제 Logpresso 테이블",
+            value=mapped_store_table or "",
+            placeholder="예: waf_events",
+        )
+        product_default = st.checkbox("제품 전체 기본 테이블로 저장", value=not bool(selected_store_schema))
+        if st.button("테이블 매핑 저장", disabled=not selected_store_product or not has_role("editor", "admin")):
+            try:
+                store_mapping.save(
+                    selected_store_product,
+                    mapping_table,
+                    None if product_default else selected_store_schema or None,
+                )
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success("테이블 매핑을 저장했습니다.")
+                st.rerun()
+        mappings = store_mapping.list()
+        if mappings:
+            st.dataframe(mappings, use_container_width=True, hide_index=True)
+
+        store_file = st.file_uploader("Store 카탈로그 Excel 업데이트", type=["xlsx"], key="store_schema_xlsx")
+        if store_file is not None:
+            updater = StoreSchemaUpdate(settings.store_schema_path)
+            try:
+                candidate = updater.parse_xlsx(store_file.getvalue(), store_file.name)
+                comparison = updater.compare(
+                    updater.current(StoreSchemaKnowledge.bundled().payload), candidate
+                )
+            except StoreSchemaUpdateError as error:
+                st.error(str(error))
+            else:
+                st.json(comparison)
+                confirmed = st.checkbox("변경 내역을 확인했습니다.", key="store_schema_apply_confirmed")
+                if st.button(
+                    "Store 카탈로그 적용",
+                    disabled=not confirmed or not has_role("admin"),
+                ):
+                    updater.save(candidate)
+                    st.success("Store 카탈로그를 적용하고 이전 파일을 백업했습니다.")
+                    st.rerun()
+
+        raw_formats = (selected_product_data or {}).get("raw_formats", [])
+        if raw_formats:
+            raw_type = st.selectbox("Raw 로그 유형", [str(item.get("log_type")) for item in raw_formats])
+            raw_line = st.text_area("Raw Syslog 샘플", key="store_raw_sample")
+            if st.button("Raw 형식 검증") and raw_line:
+                raw_result = store_knowledge.validate_raw(selected_store_product, raw_type, raw_line)
+                if raw_result.get("valid"):
+                    st.success(f"필드 수 {raw_result['actual_fields']}개가 공개 형식과 일치합니다.")
+                else:
+                    st.warning(
+                        f"예상 {raw_result.get('expected_fields', 0)}개 / 실제 {raw_result.get('actual_fields', 0)}개"
+                    )
+                st.json(raw_result)
     with st.expander("업무 별칭 관리"):
         alias_store = AliasStore(settings.db_path)
         alias_file = st.file_uploader("별칭 CSV 가져오기", type=["csv"], key="alias_csv_import")
@@ -629,6 +718,8 @@ def current_context() -> RequestContext:
     return RequestContext(
         product=product,
         version=version or None,
+        store_product=selected_store_product or None,
+        store_schema=selected_store_schema or None,
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_tables.split(",") if value.strip()]

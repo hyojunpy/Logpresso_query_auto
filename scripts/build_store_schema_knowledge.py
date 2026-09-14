@@ -63,6 +63,30 @@ FIELD_ALIASES = {
     "line": ["원문", "원본 로그", "시스로그 메시지"],
 }
 
+FIELD_TOKEN_ALIASES = {
+    "account": ["계정", "계정명", "사용자 계정"],
+    "client": ["클라이언트", "접속자"],
+    "server": ["서버", "대상 서버"],
+    "remote": ["원격", "원격지"],
+    "local": ["로컬", "내부"],
+    "source": ["출발지", "소스", "송신지"],
+    "destination": ["목적지", "도착지", "대상"],
+    "src": ["출발지", "소스", "송신지"],
+    "dst": ["목적지", "도착지", "대상"],
+    "ip": ["IP", "주소"],
+    "port": ["포트"],
+    "username": ["사용자명", "계정명", "아이디"],
+    "userid": ["사용자 ID", "계정 ID"],
+    "query": ["질의", "쿼리"],
+    "sql": ["SQL", "쿼리"],
+    "elapsed": ["경과 시간", "소요 시간", "처리 시간"],
+    "latency": ["지연 시간", "응답 시간"],
+    "event": ["이벤트"],
+    "category": ["분류", "카테고리"],
+    "method": ["메서드", "요청 방식"],
+    "path": ["경로", "요청 경로"],
+}
+
 LOG_TYPE_ALIASES = {
     "urlblock": ["웹 차단", "URL 차단", "유해 사이트 차단", "웹 필터링"],
     "sslvpn_user_auth": ["SSL VPN 인증", "VPN 사용자 인증", "원격 접속 인증", "VPN 로그인"],
@@ -126,8 +150,25 @@ def _schema_aliases(product_aliases: list[str], schema_name: str, log_types: lis
     return [schema_name], sorted(short_aliases, key=lambda item: (-len(item), item))
 
 
+def _derived_field_aliases(name: str) -> set[str]:
+    """Build conservative Korean aliases from common field-name tokens."""
+    aliases: set[str] = set()
+    compact = name.lower().replace("_", "")
+    aliases.update(FIELD_TOKEN_ALIASES.get(compact, []))
+    tokens = [token for token in re.split(r"[_-]+", name.lower()) if token]
+    if len(tokens) == 2:
+        left = FIELD_TOKEN_ALIASES.get(tokens[0], [])
+        right = FIELD_TOKEN_ALIASES.get(tokens[1], [])
+        for left_alias in left[:3]:
+            for right_alias in right[:2]:
+                aliases.add(f"{left_alias} {right_alias}")
+                aliases.add(f"{left_alias}{right_alias}")
+    return aliases
+
+
 def _field(name: str, source_type: str, display_name: str, description: str) -> dict[str, object]:
     aliases = set(FIELD_ALIASES.get(name, []))
+    aliases.update(_derived_field_aliases(name))
     if display_name:
         aliases.update({display_name, re.sub(r"\s+", "", display_name)})
     return {
@@ -139,6 +180,12 @@ def _field(name: str, source_type: str, display_name: str, description: str) -> 
 
 def build(source: Path) -> dict[str, object]:
     workbook = load_workbook(source, read_only=True, data_only=True)
+    version = "unknown"
+    if "요약" in workbook.sheetnames:
+        for row in workbook["요약"].iter_rows(values_only=True):
+            if _cell(row[0] if row else "") == "기준일":
+                version = _cell(row[1] if len(row) > 1 else "") or version
+                break
     metadata: dict[str, dict[str, object]] = {}
     for row in workbook["제품_목록"].iter_rows(min_row=2, values_only=True):
         manufacturer, product = _cell(row[0]), _cell(row[1])
@@ -216,7 +263,7 @@ def build(source: Path) -> dict[str, object]:
         "raw_formats": sum(len(items) for items in raw_formats.values()),
     }
     return {
-        "version": "2026-09-14", "source": source.name, "stats": stats,
+        "version": version, "source": source.name, "stats": stats,
         "common_fields": common_fields, "products": products,
     }
 

@@ -128,6 +128,8 @@ class Catalog(BaseModel):
 class RequestContext(BaseModel):
     product: str | None = None
     version: str | None = None
+    store_product: str | None = None
+    store_schema: str | None = None
     known_tables: list[str] = []
     known_fields: list[str] = []
     known_loggers: list[str] = []

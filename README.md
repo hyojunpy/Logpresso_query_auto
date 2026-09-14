@@ -153,6 +153,19 @@ LLM_CONTEXT_EXCERPT_CHARS=600
 
 `app/resources/logpresso_store_schema.json`에는 Logpresso Store Syslog 카탈로그에서 추출한 제품, 스키마, 로그 코드, 정규화 필드, 공개 Raw 형식이 들어 있습니다. 자연어 요청에 제품이나 스키마가 포함되면 해당 범위에서만 필드 표시명과 한국어 유사어를 실제 필드명으로 바꿉니다. 일반 단어와 겹치는 로그 코드는 제품이 함께 식별된 경우에만 사용합니다.
 
+Streamlit 사이드바의 `Logpresso Store 스키마`에서 제품과 스키마를 직접 고르면 이름을 요청에 반복해서 입력하지 않아도 됩니다. 실제 수집 테이블은 제품 기본값 또는 개별 스키마 단위로 저장할 수 있으며, 이후 요청에서는 해당 테이블이 자동 적용됩니다. 제품·스키마 검색, 카탈로그 범위 통계, 공개 Raw 형식의 필드 수 검증도 같은 화면에서 제공합니다.
+
+관리자는 새 카탈로그 `.xlsx`를 먼저 비교 화면으로 확인한 다음 적용할 수 있습니다. 적용 파일은 `data/store-schema.json`, 테이블 매핑은 `data/store-table-mappings.json`에 저장됩니다. 기존 적용 파일은 갱신할 때 UTC 시각이 붙은 JSON으로 백업됩니다.
+
+API를 사용하는 경우 다음 엔드포인트를 제공합니다.
+
+- `GET /api/v1/store-schema/status`: 카탈로그 버전과 커버리지
+- `GET /api/v1/store-schema/products`, `GET /api/v1/store-schema/search?q=...`: 목록과 검색
+- `GET|PUT /api/v1/store-schema/mappings`: 실제 테이블 매핑 조회·저장
+- `POST /api/v1/store-schema/raw/validate`: 공개 Raw 양식 구조 검증
+- `POST /api/v1/store-schema/import/xlsx?apply=false`: Excel 변경 미리보기
+- `POST /api/v1/store-schema/import/xlsx?apply=true`: 검토한 Excel 적용
+
 카탈로그 엑셀을 갱신한 뒤 아래 명령으로 앱 리소스를 다시 생성할 수 있습니다.
 
 ```powershell

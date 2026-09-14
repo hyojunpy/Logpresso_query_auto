@@ -5,6 +5,9 @@ from functools import lru_cache
 from importlib.resources import files
 import json
 import re
+import shlex
+from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any
 
 from app.models.request import Catalog, CatalogField, CatalogTable, GenerateQueryRequest
@@ -36,14 +39,26 @@ class StoreSchemaKnowledge:
         resource = files("app.resources").joinpath("logpresso_store_schema.json")
         return cls(json.loads(resource.read_text(encoding="utf-8")))
 
-    def match(self, text: str) -> StoreSchemaMatch | None:
+    @classmethod
+    def active(cls, override_path: str | Path | None = None) -> "StoreSchemaKnowledge":
+        path = Path(override_path) if override_path else None
+        if path and path.exists():
+            return cls(json.loads(path.read_text(encoding="utf-8")))
+        return cls.bundled()
+
+    def match(
+        self, text: str, product_hint: str | None = None, schema_hint: str | None = None
+    ) -> StoreSchemaMatch | None:
         products = self.payload.get("products", [])
-        product = self._matching_product(text, products)
+        product = next((item for item in products if item.get("name") == product_hint), None)
+        product = product or self._matching_product(text, products)
         schemas = product.get("schemas", []) if product else [
             schema for item in products for schema in item.get("schemas", [])
         ]
-        matched = self._matching_schemas(
-            text, schemas,
+        hinted_schema = next((item for item in schemas if item.get("name") == schema_hint), None)
+        matched = [hinted_schema] if hinted_schema else self._matching_schemas(
+            text,
+            schemas,
             include_short_aliases=product is not None,
             include_log_types=product is not None,
         )
@@ -76,16 +91,21 @@ class StoreSchemaKnowledge:
         )
 
     def enrich(self, payload: GenerateQueryRequest) -> GenerateQueryRequest:
-        match = self.match(payload.request)
+        match = self.match(payload.request, payload.context.store_product, payload.context.store_schema)
         if match is None:
             return payload
         context = payload.context.model_copy(deep=True)
         request = payload.request
-        if match.schema_name and not self._contains(request, match.schema_name):
+        if match.schema_name:
             for alias in sorted(match.schema_aliases, key=len, reverse=True):
                 is_semantic_collision = any(word in alias.lower() for word in ("차단", "거부", "deny", "block"))
-                if alias != match.schema_name and is_semantic_collision and self._contains(request, alias):
-                    request = re.sub(re.escape(alias), match.schema_name, request, count=1, flags=re.IGNORECASE)
+                if is_semantic_collision and self._contains(request, alias):
+                    replacement = (
+                        match.schema_name
+                        if not any(word in match.schema_name.lower() for word in ("차단", "거부", "deny", "block"))
+                        else "Store 보안 이벤트"
+                    )
+                    request = re.sub(re.escape(alias), replacement, request, count=1, flags=re.IGNORECASE)
                     break
         for phrase, field_name in match.replacements:
             request = self._replace_field_alias(request, phrase, field_name)
@@ -116,6 +136,84 @@ class StoreSchemaKnowledge:
                 )],
             )
         return payload.model_copy(update={"request": request, "context": context})
+
+    def status(self) -> dict[str, Any]:
+        stats = dict(self.payload.get("stats", {}))
+        products = self.payload.get("products", [])
+        stats.update({
+            "version": self.payload.get("version"),
+            "source": self.payload.get("source"),
+            "manufacturers": len({item.get("manufacturer") for item in products if item.get("manufacturer")}),
+            "products_with_raw_formats": sum(bool(item.get("raw_formats")) for item in products),
+            "schemas_without_fields": sum(
+                not schema.get("fields") for item in products for schema in item.get("schemas", [])
+            ),
+        })
+        return stats
+
+    def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        needle = self._normalize(query)
+        results = []
+        for product in self.payload.get("products", []):
+            for schema in product.get("schemas", []):
+                phrases = [
+                    product.get("manufacturer", ""), product.get("name", ""), schema.get("name", ""),
+                    *product.get("aliases", []), *schema.get("short_aliases", []), *schema.get("log_types", []),
+                ]
+                haystacks = [self._normalize(str(value)) for value in phrases if value]
+                contains = any(needle and needle in value for value in haystacks)
+                similarity = max((SequenceMatcher(None, needle, value).ratio() for value in haystacks), default=0)
+                if contains or similarity >= 0.55:
+                    results.append({
+                        "manufacturer": product.get("manufacturer"), "product": product.get("name"),
+                        "schema": schema.get("name"), "log_types": schema.get("log_types", []),
+                        "field_count": len(schema.get("fields", [])), "score": round(1.0 if contains else similarity, 3),
+                    })
+        return sorted(results, key=lambda item: (-item["score"], -item["field_count"], str(item["schema"])))[:max(1, min(limit, 100))]
+
+    def validate_raw(self, product_name: str, log_type: str, raw_line: str) -> dict[str, Any]:
+        product = next((item for item in self.payload.get("products", []) if item.get("name") == product_name), None)
+        if not product:
+            return {"valid": False, "reason": "unknown_product"}
+        format_ = next((item for item in product.get("raw_formats", []) if str(item.get("log_type", "")).lower() == log_type.lower()), None)
+        if not format_:
+            return {"valid": False, "reason": "raw_format_unavailable"}
+        template = str(format_.get("template") or "")
+        delimiter = "pipe"
+        expected = [part.strip() for part in template.split("|") if part.strip()]
+        actual = raw_line.rstrip("\r\n").split("|")
+        if len(expected) <= 1 and "`%{" in template:
+            delimiter = "backtick"
+            expected = re.findall(r"%\{([^}]+)\}", template)
+            actual = [part for part in raw_line.rstrip("\r\n").split("`") if part]
+            if actual and ":" in actual[0]:
+                actual[0] = actual[0].split(":", 1)[1]
+        elif len(expected) <= 1 and "%" in template:
+            delimiter = "whitespace"
+            expected = re.findall(r"%[A-Za-z0-9_]+", template)
+            try:
+                actual = shlex.split(raw_line.rstrip("\r\n"))
+            except ValueError:
+                actual = []
+        if len(expected) <= 1:
+            return {
+                "valid": False,
+                "reason": "unsupported_template",
+                "transport": format_.get("transport"),
+                "source_url": format_.get("source_url"),
+            }
+        return {
+            "valid": len(actual) == len(expected),
+            "reason": "matched" if len(actual) == len(expected) else "field_count_mismatch",
+            "expected_fields": len(expected), "actual_fields": len(actual),
+            "field_names": expected, "transport": format_.get("transport"),
+            "delimiter": delimiter,
+            "source_url": format_.get("source_url"),
+        }
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return re.sub(r"[^0-9a-z가-힣]+", "", value.lower())
 
     @staticmethod
     def _contains(text: str, phrase: str) -> bool:
