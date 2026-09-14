@@ -82,14 +82,14 @@ QUICK_TEST_REQUESTS: dict[str, list[str]] = {
         "최근 24시간 network_logs에서 host별 전체 사용량을 계산하고 asset_info와 host와 hostname 기준으로 left join해줘",
         "최근 24시간 db_logs에서 duration_ms가 1000 이상인 쿼리를 database별로 집계해줘",
     ],
-    "SECUI Store 스키마": [
+    "Logpresso Store 스키마": [
         "최근 24시간 secui_events에서 블루맥스 NGF 웹 필터의 출발지 IP별 건수를 많은 순으로 10개 보여줘",
-        "최근 1시간 secui_events에서 NGF IPSEC 터널별 통계의 터널ID별 송신량 합계를 보여줘",
-        "최근 24시간 secui_events에서 NGF DNS 보안 로그를 도메인별로 집계해줘",
-        "최근 10분 secui_events에서 NGF 시스템 성능의 호스트명별 CPU 사용률 평균을 보여줘",
-        "최근 1시간 secui_events에서 NGF 침입 탐지 로그의 공격자 IP별 전체 바이트 합계를 많은 순으로 20개 보여줘",
-        "최근 24시간 secui_events에서 NGF SSL VPN 인증의 user별 result가 failed인 건수를 보여줘",
-        "최근 24시간 secui_events에서 NGF 블랙리스트의 목적지 IP와 목적지 포트만 보여줘",
+        "최근 24시간 secui_events에서 WAPPLES 침입탐지의 출발지 IP별 위험도 점수 평균을 보여줘",
+        "최근 24시간 secui_events에서 QueryPie DAC SQL 감사의 사용자별 실행 시간 평균을 보여줘",
+        "최근 24시간 secui_events에서 FortiGate Webfilter의 출발지 IP별 건수를 보여줘",
+        "최근 1시간 secui_events에서 AhnLab TrusGuard IPS의 출발지 IP별 건수를 보여줘",
+        "최근 24시간 secui_events에서 Genian EDR DNS 로그의 도메인별 건수를 보여줘",
+        "최근 24시간 secui_events에서 Cisco Meraki IPS의 출발지 IP별 건수를 보여줘",
     ],
     "긴 복합 파이프라인": [
         "최근 24시간 firewall_logs에서 deny 로그를 src_ip별로 집계하고 10건 이상인 결과를 asset_info의 ip_address와 left join해줘",

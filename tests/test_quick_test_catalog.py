@@ -36,4 +36,4 @@ def test_every_quick_test_generates_a_query():
             outcomes.append((category, request, response.status, response.query))
     failures = [item for item in outcomes if item[2] != "generated" or not item[3]]
     assert failures == []
-    assert len(outcomes) == 63
+    assert len(outcomes) == quick_test_count()

@@ -18,7 +18,7 @@ from app.services.catalog_service import CatalogService
 from app.services.execution_preview import ExecutionPreviewService
 from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.alias_store import AliasStore
-from app.services.secui_knowledge import SecuiKnowledge
+from app.services.store_schema_knowledge import StoreSchemaKnowledge
 
 
 class QueryGenerator:
@@ -44,13 +44,27 @@ class QueryGenerator:
         )
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
-        secui_knowledge = SecuiKnowledge.bundled()
-        secui_match = secui_knowledge.match(payload.request)
-        payload = secui_knowledge.enrich(payload)
+        store_knowledge = StoreSchemaKnowledge.bundled()
+        store_match = store_knowledge.match(payload.request)
+        payload = store_knowledge.enrich(payload)
         payload = self._with_business_aliases(payload)
         intent = self.intent_parser.parse(payload)
-        if secui_match and secui_match.log_type and not any(item.field == "log_type" for item in intent.filters):
-            intent.filters.insert(0, FilterCondition(field="log_type", value=secui_match.log_type))
+        if store_match and store_match.discriminator_field and store_match.log_types:
+            field = store_match.discriminator_field
+            if not any(item.field == field for item in intent.filters):
+                intent.filters[0:0] = [
+                    FilterCondition(
+                        field=field,
+                        value=value,
+                        value_type=(
+                            "number"
+                            if field == "module_flag" and re.fullmatch(r"-?\d+(?:\.\d+)?", value)
+                            else "string"
+                        ),
+                        conjunction="and" if index == 0 else "or",
+                    )
+                    for index, value in enumerate(store_match.log_types)
+                ]
         search_text = f"{payload.request} table logger stream fulltext search stats rollup timechart eval fields rename join first last set setq"
         results = self.retriever.search(search_text, limit=settings.retrieval_limit)
         if not results:

@@ -149,6 +149,18 @@ LLM_CONTEXT_EXCERPT_CHARS=600
 
 `OLLAMA_NUM_PREDICT`를 더 낮추면 응답은 빨라질 수 있지만 긴 쿼리 JSON이 잘릴 수 있습니다. `scripts/check_deployment.py`는 시간 제한, 출력 토큰, 컨텍스트 창, 문서 근거 설정 범위를 외부 호출 없이 검사합니다.
 
+## Logpresso Store Syslog 스키마 지식
+
+`app/resources/logpresso_store_schema.json`에는 Logpresso Store Syslog 카탈로그에서 추출한 제품, 스키마, 로그 코드, 정규화 필드, 공개 Raw 형식이 들어 있습니다. 자연어 요청에 제품이나 스키마가 포함되면 해당 범위에서만 필드 표시명과 한국어 유사어를 실제 필드명으로 바꿉니다. 일반 단어와 겹치는 로그 코드는 제품이 함께 식별된 경우에만 사용합니다.
+
+카탈로그 엑셀을 갱신한 뒤 아래 명령으로 앱 리소스를 다시 생성할 수 있습니다.
+
+```powershell
+python scripts\build_store_schema_knowledge.py <Store-카탈로그.xlsx> app\resources\logpresso_store_schema.json
+```
+
+스키마 필드는 파싱 후 정규화된 필드입니다. 장비의 Raw Syslog 순서·구분자와 동일하다고 가정하지 않으며, 공개 Raw 형식이 없는 제품은 실제 장비 샘플로 최종 검증해야 합니다.
+
 ## 문서 인덱싱
 
 기준 문서를 `docs/로그프레소 쿼리.docx`에 둔 뒤 실행합니다.
