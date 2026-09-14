@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 from collections import defaultdict
+from io import BytesIO
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -179,7 +180,9 @@ def _field(name: str, source_type: str, display_name: str, description: str) -> 
 
 
 def build(source: Path) -> dict[str, object]:
-    workbook = load_workbook(source, read_only=True, data_only=True)
+    # Load from memory so openpyxl never holds a Windows lock on the upload
+    # temporary file while the caller removes it.
+    workbook = load_workbook(BytesIO(source.read_bytes()), read_only=True, data_only=True)
     version = "unknown"
     if "요약" in workbook.sheetnames:
         for row in workbook["요약"].iter_rows(values_only=True):
@@ -262,6 +265,7 @@ def build(source: Path) -> dict[str, object]:
         "fields": sum(len(schema["fields"]) for schema in schemas.values()),
         "raw_formats": sum(len(items) for items in raw_formats.values()),
     }
+    workbook.close()
     return {
         "version": version, "source": source.name, "stats": stats,
         "common_fields": common_fields, "products": products,
