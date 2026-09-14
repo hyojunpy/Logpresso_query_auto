@@ -7,8 +7,8 @@ from tests.support import shared_index
 
 
 def test_quick_test_catalog_contains_all_grouped_composite_examples():
-    assert quick_test_count() == 63
-    assert len(QUICK_TEST_REQUESTS) == 11
+    assert quick_test_count() == 70
+    assert len(QUICK_TEST_REQUESTS) == 12
 
 
 def test_quick_test_preset_infers_schema_and_realtime_sources():

@@ -82,6 +82,15 @@ QUICK_TEST_REQUESTS: dict[str, list[str]] = {
         "최근 24시간 network_logs에서 host별 전체 사용량을 계산하고 asset_info와 host와 hostname 기준으로 left join해줘",
         "최근 24시간 db_logs에서 duration_ms가 1000 이상인 쿼리를 database별로 집계해줘",
     ],
+    "SECUI Store 스키마": [
+        "최근 24시간 secui_events에서 블루맥스 NGF 웹 필터의 출발지 IP별 건수를 많은 순으로 10개 보여줘",
+        "최근 1시간 secui_events에서 NGF IPSEC 터널별 통계의 터널ID별 송신량 합계를 보여줘",
+        "최근 24시간 secui_events에서 NGF DNS 보안 로그를 도메인별로 집계해줘",
+        "최근 10분 secui_events에서 NGF 시스템 성능의 호스트명별 CPU 사용률 평균을 보여줘",
+        "최근 1시간 secui_events에서 NGF 침입 탐지 로그의 공격자 IP별 전체 바이트 합계를 많은 순으로 20개 보여줘",
+        "최근 24시간 secui_events에서 NGF SSL VPN 인증의 user별 result가 failed인 건수를 보여줘",
+        "최근 24시간 secui_events에서 NGF 블랙리스트의 목적지 IP와 목적지 포트만 보여줘",
+    ],
     "긴 복합 파이프라인": [
         "최근 24시간 firewall_logs에서 deny 로그를 src_ip별로 집계하고 10건 이상인 결과를 asset_info의 ip_address와 left join해줘",
         "최근 24시간 web_logs에서 5xx 오류를 service별로 집계하고 10건 이상이며 평균 response_time이 1000 이상인 결과를 보여줘",
@@ -108,6 +117,10 @@ SAMPLE_TABLE_FIELDS: dict[str, list[str]] = {
     "raw_web_logs": ["_time", "message", "service", "method", "uri", "status", "response_time"],
     "raw_security_logs": ["_time", "message", "events", "event_type", "src_ip", "dst_ip", "severity"],
     "db_logs": ["_time", "database", "duration_ms", "query"],
+    "secui_events": [
+        "_time", "hostname", "log_type", "src_ip", "src_port", "dst_ip", "dst_port", "action",
+        "domain", "tunnel_id", "tx_bytes", "rx_bytes", "cpu_usage", "total_bytes", "user", "result",
+    ],
     "insa": ["ip", "name", "department"],
 }
 

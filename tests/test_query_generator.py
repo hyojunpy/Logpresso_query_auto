@@ -16,6 +16,56 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_generates_secui_query_from_korean_schema_and_field_aliases(self):
+        response = generator(MockProvider()).generate(
+            GenerateQueryRequest(
+                request="secui_events 테이블에서 최근 24시간 블루맥스 NGF 웹 필터 출발지 IP별 건수 보여줘",
+                context=RequestContext(known_tables=["secui_events"]),
+            )
+        )
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("table duration=24h secui_events", response.query)
+        self.assertIn('log_type == "urlblock"', response.query)
+        self.assertIn("stats count by src_ip", response.query)
+
+    def test_generates_secui_metric_query_from_related_terms(self):
+        response = generator(MockProvider()).generate(
+            GenerateQueryRequest(
+                request="secui_events에서 최근 1시간 NGF IPSEC 터널별 통계의 송신량 합계를 보여줘",
+                context=RequestContext(known_tables=["secui_events"]),
+            )
+        )
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn('log_type == "ipsecvpn_tunnelid_traffic"', response.query)
+        self.assertIn("sum(tx_bytes)", response.query)
+
+    def test_resolves_web_filter_synonym_without_treating_urlblock_as_deny(self):
+        response = generator(MockProvider()).generate(
+            GenerateQueryRequest(
+                request="secui_events에서 최근 1시간 NGF 유해 사이트 차단의 도메인별 건수 보여줘",
+                context=RequestContext(known_tables=["secui_events"]),
+            )
+        )
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn('log_type == "urlblock"', response.query)
+        self.assertIn("stats count by domain", response.query)
+        self.assertNotIn('action == "deny"', response.query)
+
+    def test_secui_grouped_collect_phrase_implies_count(self):
+        response = generator(MockProvider()).generate(
+            GenerateQueryRequest(
+                request="최근 24시간 secui_events에서 NGF DNS 보안 로그를 도메인별로 집계해줘",
+                context=RequestContext(known_tables=["secui_events"]),
+            )
+        )
+
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn('log_type == "dns_security"', response.query)
+        self.assertIn("stats count by domain", response.query)
+
     def test_generates_login_failure_join_from_quick_test_schema(self):
         response = generator().generate(
             GenerateQueryRequest(
