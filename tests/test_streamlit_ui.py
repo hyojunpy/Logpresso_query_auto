@@ -28,6 +28,8 @@ class StreamlitUiTest(unittest.TestCase):
         next(item for item in app.selectbox if item.label == "로그 형식").select("AIWAF Alert").run()
 
         self.assertTrue(any(item.label == "선택된 로그 형식 필드 28개" for item in app.expander))
+        table_input = next(item for item in app.text_input if item.label == "조회 테이블")
+        self.assertEqual(table_input.value, "secui_events")
         field_table = next(item for item in app.dataframe if "필드명" in item.value.columns)
         self.assertIn("_time", field_table.value["필드명"].tolist())
         self.assertIn("표시명", field_table.value.columns)

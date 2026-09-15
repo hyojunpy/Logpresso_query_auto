@@ -608,6 +608,27 @@ class QueryGeneratorTest(unittest.TestCase):
         self.assertEqual(response.query, "table firewall_logs")
         self.assertTrue(response.debug["template_fallback"])
 
+    def test_falls_back_when_llm_omits_source_and_time_pipeline(self):
+        response = generator(
+            MockProvider(generation_response={"status": "generated", "query": "stats by src_ip count"})
+        ).generate(
+            GenerateQueryRequest(
+                request="최근 24시간 AXGATE NGFW 세션에서 출발지 IP별 건수를 보여줘",
+                context=RequestContext(
+                    product="ENT",
+                    store_product="AXGATE NGFW (NF)",
+                    store_schema="AXGATE NGFW 세션",
+                    known_tables=["secui_events"],
+                    known_fields=["_time", "src_ip"],
+                ),
+            )
+        )
+        self.assertEqual(response.status, "generated", response.questions)
+        self.assertIn("table duration=24h secui_events", response.query)
+        self.assertIn("stats count by src_ip", response.query)
+        self.assertTrue(response.debug["template_fallback"])
+        self.assertEqual(response.debug["fallback_reason"], "llm_candidate_missing_required_pipeline")
+
     def test_falls_back_to_template_when_repair_remains_invalid(self):
         response = generator(
             MockProvider(

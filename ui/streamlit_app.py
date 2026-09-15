@@ -705,7 +705,15 @@ selected_store_schema = st.selectbox(
     disabled=not selected_store_product,
     help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
 )
-mapped_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+query_store_table = st.text_input(
+    "조회 테이블",
+    value=saved_store_table or ("secui_events" if selected_store_product else ""),
+    disabled=not selected_store_product,
+    help="테스트 기본값은 secui_events입니다. 실제 환경의 테이블명이 다르면 변경하세요.",
+    key=f"query_store_table::{selected_store_product}::{selected_store_schema}",
+)
+mapped_store_table = query_store_table.strip() or None
 selected_schema_data = next(
     (item for item in (selected_product_data or {}).get("schemas", []) if item.get("name") == selected_store_schema),
     None,
@@ -718,6 +726,8 @@ if selected_store_product:
     if mapped_store_table:
         context_parts.append(f"대상 테이블: {mapped_store_table}")
     st.caption(" · ".join(context_parts))
+    if mapped_store_table and not saved_store_table:
+        st.info("`secui_events`는 테스트용 기본 테이블입니다. 실제 로그 테이블이 다르면 위 값을 변경하세요.")
     if selected_store_schema and field_count:
         field_rows = [
             {
