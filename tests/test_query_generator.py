@@ -17,6 +17,16 @@ def generator(llm=None) -> QueryGenerator:
 
 
 class QueryGeneratorTest(unittest.TestCase):
+    def test_generates_curated_license_expiry_dashboard_query(self):
+        response = generator(MockProvider()).generate(GenerateQueryRequest(
+            request="라이선스 만료일 보여줘",
+            context=RequestContext(product="ENT"),
+        ))
+        self.assertEqual(response.status, "generated", response.validation.errors)
+        self.assertIn("confdb docs logpresso-license licenses", response.query)
+        self.assertIn("datediff(now(), 라이선스만료일", response.query)
+        self.assertEqual(response.debug["dashboard_template"], "라이선스 만료일")
+
     def test_generates_or_filter_for_schema_with_multiple_numeric_log_codes(self):
         response = generator(MockProvider()).generate(GenerateQueryRequest(
             request="최근 24시간 dpx_events에서 AhnLab DPX 차단 로그를 src_ip별로 집계해줘",

@@ -20,6 +20,7 @@ from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.alias_store import AliasStore
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.dashboard_query_knowledge import DashboardQueryKnowledge
 
 
 class QueryGenerator:
@@ -45,6 +46,9 @@ class QueryGenerator:
         )
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
+        dashboard_example = DashboardQueryKnowledge.bundled().match(payload.request)
+        if dashboard_example:
+            return self._dashboard_response(payload, dashboard_example)
         store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
         store_match = store_knowledge.match(
             payload.request, payload.context.store_product, payload.context.store_schema
@@ -181,6 +185,29 @@ class QueryGenerator:
                 "fallback_reason": fallback_reason,
                 "repair_attempts": repair_attempts,
             },
+        )
+
+    def _dashboard_response(self, payload: GenerateQueryRequest, example: dict) -> GenerateQueryResponse:
+        query = str(example["query"])
+        intent = QueryIntent(objective=payload.request, query_type="adhoc")
+        validation = self._validate(query, payload)
+        references = references_for_query_parts(
+            self.retriever, query, "검증된 운영 대시보드 예제의 명령어 근거입니다."
+        )
+        quality = self.quality_analyzer.analyze(query, validation)
+        preview = self.execution_preview.build(query if validation.valid else None, validation, quality)
+        return GenerateQueryResponse(
+            status="generated" if validation.valid else "unsupported",
+            query=query if validation.valid else None,
+            intent=intent,
+            validation=validation,
+            schema_validation=self.catalog.validate_query(query, payload.context),
+            quality=quality,
+            execution_preview=preview,
+            explanation=self._explain(query, intent),
+            references=references,
+            assumptions=[f"검증된 운영 대시보드 템플릿을 적용했습니다: {example['title']}"],
+            debug={"provider": "curated_dashboard_template", "dashboard_template": example["title"]},
         )
 
     @staticmethod
