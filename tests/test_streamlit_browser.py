@@ -47,7 +47,7 @@ class StreamlitBrowserTest(unittest.TestCase):
 
     def test_clarification_then_generation_and_structure_view(self):
         from playwright.sync_api import expect, sync_playwright
-        request_label = "\uc0ac\uc6a9\uc790 \uc694\uccad"
+        request_label = "\ucffc\ub9ac \uc694\uccad"
         generate_label = "\ucffc\ub9ac \uc0dd\uc131"
         clarification_label = "\ud655\uc778 \uc9c8\ubb38 \ub2f5\ubcc0"
         with sync_playwright() as playwright:
