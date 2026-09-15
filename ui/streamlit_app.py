@@ -8,6 +8,7 @@ import streamlit as st
 from app.core.config import settings
 from app.core.ui_auth import LoginAttemptStore, authenticate, hash_password, load_users, session_expired, verify_password
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
+from app.models.dashboard import DashboardDefinition, DashboardDesignRequest, DashboardThreshold
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.feedback_store import FeedbackStore
@@ -31,6 +32,7 @@ from app.services.metrics_store import MetricsStore, metric_label, operational_o
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.dashboard_designer import DashboardDesigner, dashboard_to_yaml
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -681,6 +683,129 @@ with st.sidebar:
                     )
 
 st.title("로그프레소 자연어 쿼리 생성기")
+
+work_mode = st.radio("작업 유형", ["쿼리 생성", "대시보드 생성"], horizontal=True)
+if work_mode == "대시보드 생성":
+    st.subheader("자연어 대시보드 설계")
+    st.caption("공통 운영 대시보드 또는 제조사·제품·로그 형식별 보안 대시보드를 설계합니다.")
+    dashboard_request = st.text_area(
+        "대시보드 요청",
+        placeholder="예: 라이선스와 로그 수집 상태를 한 화면에서 확인하는 운영 대시보드 만들어줘",
+        height=100,
+    )
+    dashboard_products = store_knowledge.payload.get("products", [])
+    dashboard_manufacturers = list(dict.fromkeys(
+        str(item.get("manufacturer")) for item in dashboard_products if item.get("manufacturer")
+    ))
+    scope_col1, scope_col2, scope_col3 = st.columns(3)
+    with scope_col1:
+        dashboard_manufacturer = st.selectbox("대시보드 제조사", [""] + dashboard_manufacturers)
+    scoped_products = [
+        str(item.get("name")) for item in dashboard_products
+        if not dashboard_manufacturer or item.get("manufacturer") == dashboard_manufacturer
+    ]
+    with scope_col2:
+        dashboard_product = st.selectbox("대시보드 제품", [""] + scoped_products)
+    dashboard_product_data = next(
+        (item for item in dashboard_products if item.get("name") == dashboard_product), None
+    )
+    dashboard_schemas = [str(item.get("name")) for item in (dashboard_product_data or {}).get("schemas", [])]
+    with scope_col3:
+        dashboard_schema = st.selectbox("대시보드 로그 형식", [""] + dashboard_schemas, disabled=not dashboard_product)
+    setting_col1, setting_col2, setting_col3 = st.columns(3)
+    with setting_col1:
+        dashboard_table = st.text_input(
+            "대시보드 조회 테이블",
+            value="secui_events" if dashboard_product else "",
+            disabled=not dashboard_product,
+        )
+    with setting_col2:
+        dashboard_time_range = st.selectbox("기본 시간 범위", ["1h", "6h", "24h", "7d", "30d"], index=2)
+    with setting_col3:
+        dashboard_refresh = st.number_input("새로고침 주기 초", min_value=30, max_value=86400, value=300, step=30)
+    if st.button("대시보드 설계", type="primary", disabled=not dashboard_request.strip()):
+        st.session_state["dashboard_definition"] = DashboardDesigner().design(DashboardDesignRequest(
+            request=dashboard_request,
+            manufacturer=dashboard_manufacturer or None,
+            store_product=dashboard_product or None,
+            store_schema=dashboard_schema or None,
+            table_name=dashboard_table or None,
+            default_time_range=dashboard_time_range,
+            refresh_interval_seconds=int(dashboard_refresh),
+            context=RequestContext(product=product),
+        )).model_dump()
+
+    if dashboard_payload := st.session_state.get("dashboard_definition"):
+        dashboard = DashboardDefinition.model_validate(dashboard_payload)
+        st.divider()
+        dashboard.title = st.text_input("대시보드 제목", value=dashboard.title)
+        dashboard.description = st.text_area("대시보드 설명", value=dashboard.description, height=70)
+        st.subheader(f"패널 미리보기 · {len(dashboard.panels)}개")
+        edited_panels = []
+        for index, panel in enumerate(dashboard.panels):
+            with st.expander(f"{index + 1}. {panel.title}", expanded=index < 2):
+                title_col, visual_col, unit_col = st.columns([2, 1, 1])
+                with title_col:
+                    panel.title = st.text_input("패널 제목", value=panel.title, key=f"dashboard_panel_title_{panel.id}")
+                with visual_col:
+                    visual_options = ["metric", "status", "line", "bar", "table"]
+                    panel.visualization = st.selectbox(
+                        "시각화", visual_options, index=visual_options.index(panel.visualization), key=f"dashboard_visual_{panel.id}"
+                    )
+                with unit_col:
+                    panel.unit = st.text_input("단위", value=panel.unit or "", key=f"dashboard_unit_{panel.id}") or None
+                panel.query = st.text_area("패널 쿼리", value=panel.query, height=180, key=f"dashboard_query_{panel.id}")
+                layout_cols = st.columns(4)
+                panel.layout.x = int(layout_cols[0].number_input("X", 0, 11, panel.layout.x, key=f"dashboard_x_{panel.id}"))
+                panel.layout.y = int(layout_cols[1].number_input("Y", 0, 100, panel.layout.y, key=f"dashboard_y_{panel.id}"))
+                panel.layout.width = int(layout_cols[2].number_input("너비", 1, 12, panel.layout.width, key=f"dashboard_w_{panel.id}"))
+                panel.layout.height = int(layout_cols[3].number_input("높이", 1, 12, panel.layout.height, key=f"dashboard_h_{panel.id}"))
+                if panel.thresholds:
+                    threshold_text = st.text_area(
+                        "임계치 JSON",
+                        value=json.dumps([item.model_dump() for item in panel.thresholds], ensure_ascii=False, indent=2),
+                        height=130,
+                        key=f"dashboard_thresholds_{panel.id}",
+                        help="operator, value, severity, label을 수정할 수 있습니다.",
+                    )
+                    try:
+                        panel.thresholds = [DashboardThreshold.model_validate(item) for item in json.loads(threshold_text)]
+                    except (ValueError, TypeError):
+                        st.warning("임계치 JSON 형식을 확인하세요. 마지막 정상 값을 사용합니다.")
+                edited_panels.append(panel)
+        dashboard.panels = edited_panels
+        dashboard, dashboard_validation = DashboardDesigner().validate(dashboard, RequestContext(product=product))
+        if dashboard_validation.valid:
+            st.success(f"패널 쿼리 {dashboard_validation.valid_panels}/{dashboard_validation.panel_count}개 검증 통과")
+        else:
+            st.error(f"검증 실패 패널 {dashboard_validation.invalid_panels}개")
+        st.dataframe(dashboard_validation.panels, width="stretch", hide_index=True)
+        preview_columns = st.columns(2)
+        for index, panel in enumerate(dashboard.panels):
+            with preview_columns[index % 2].container(border=True):
+                st.markdown(f"**{panel.title}**")
+                st.caption(f"{panel.visualization} · {panel.unit or '단위 없음'} · {panel.layout.width}×{panel.layout.height}")
+                st.code(panel.query, language="text")
+        export_payload = dashboard.model_copy(deep=True)
+        for panel in export_payload.panels:
+            panel.validation = None
+        export_col1, export_col2 = st.columns(2)
+        export_col1.download_button(
+            "대시보드 JSON 다운로드",
+            export_payload.model_dump_json(indent=2),
+            file_name="logpresso-dashboard.json",
+            mime="application/json",
+            width="stretch",
+        )
+        export_col2.download_button(
+            "대시보드 YAML 다운로드",
+            dashboard_to_yaml(export_payload),
+            file_name="logpresso-dashboard.yaml",
+            mime="application/yaml",
+            width="stretch",
+        )
+        st.session_state["dashboard_definition"] = dashboard.model_dump()
+    st.stop()
 
 store_products = store_knowledge.payload.get("products", [])
 manufacturers = list(dict.fromkeys(

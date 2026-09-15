@@ -9,6 +9,22 @@ pytestmark = pytest.mark.advanced_parser
 
 @unittest.skipIf(importlib.util.find_spec("streamlit.testing.v1") is None, "streamlit testing is not installed")
 class StreamlitUiTest(unittest.TestCase):
+    def test_dashboard_mode_builds_preview_and_exports(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(Path("ui") / "streamlit_app.py"), default_timeout=30)
+        app.run()
+        next(item for item in app.radio if item.label == "작업 유형").set_value("대시보드 생성").run()
+        next(item for item in app.text_area if item.label == "대시보드 요청").set_value(
+            "라이선스와 로그 수집 상태 운영 대시보드 만들어줘"
+        )
+        next(button for button in app.button if button.label == "대시보드 설계").click().run()
+
+        assert any("패널 쿼리 8/8개 검증 통과" in item.value for item in app.success)
+        downloads = [item.label for item in app.get("download_button")]
+        assert "대시보드 JSON 다운로드" in downloads
+        assert "대시보드 YAML 다운로드" in downloads
+
     def test_main_screen_uses_product_and_schema_selection_instead_of_examples(self):
         from streamlit.testing.v1 import AppTest
 

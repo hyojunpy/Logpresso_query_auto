@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from time import perf_counter
 from uuid import uuid4
 
-from app.api.routes import aliases, audit, catalog, documents, evaluations, feedback, generate, health, metrics, store_schema, verification
+from app.api.routes import aliases, audit, catalog, dashboards, documents, evaluations, feedback, generate, health, metrics, store_schema, verification
 from app.core.config import settings
 from app.core.logging import configure_request_logging
 from app.services.metrics_store import MetricsStore
@@ -15,7 +15,7 @@ logger = configure_request_logging(settings.log_level, settings.log_file)
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Logpresso Natural Language Query Assistant",
-        version="0.1.8",
+        version="0.1.12",
         description="Generate validated Logpresso queries from Korean natural language requests.",
     )
     if settings.cors_allowed_origins:
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(generate.router, prefix="/api/v1", tags=["query"])
     app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"])
     app.include_router(store_schema.router, prefix="/api/v1/store-schema", tags=["store-schema"])
+    app.include_router(dashboards.router, prefix="/api/v1/dashboards", tags=["dashboards"])
     app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["feedback"])
     app.include_router(aliases.router, prefix="/api/v1/aliases", tags=["aliases"])
     app.include_router(audit.router, prefix="/api/v1/internal/audit", tags=["internal"])
