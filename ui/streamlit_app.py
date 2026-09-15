@@ -710,6 +710,42 @@ if work_mode == "대시보드 생성":
             )).model_dump()
             st.session_state.pop("dashboard_record_id", None)
             st.rerun()
+    syslog_examples = dashboard_designer.product_example_catalog()
+    with st.expander(f"고객사 Syslog 대시보드 예시 · {len(syslog_examples)}종", expanded=True):
+        example_manufacturers = list(dict.fromkeys(
+            str(item["manufacturer"]) for item in syslog_examples if item.get("manufacturer")
+        ))
+        syslog_col1, syslog_col2, syslog_col3 = st.columns(3)
+        with syslog_col1:
+            example_manufacturer = st.selectbox("예시 제조사", example_manufacturers)
+        example_products = list(dict.fromkeys(
+            str(item["product"]) for item in syslog_examples
+            if item.get("manufacturer") == example_manufacturer
+        ))
+        with syslog_col2:
+            example_product = st.selectbox("예시 제품", example_products)
+        product_examples = [
+            item for item in syslog_examples
+            if item.get("manufacturer") == example_manufacturer and item.get("product") == example_product
+        ]
+        with syslog_col3:
+            example_schema = st.selectbox("예시 로그 형식", [str(item["schema"]) for item in product_examples])
+        syslog_example = next(item for item in product_examples if item["schema"] == example_schema)
+        coverage_label = "상세 필드 맞춤" if syslog_example["coverage"] == "field-aware" else "기본 안전 구성"
+        st.caption(
+            f"{coverage_label} · 필드 {syslog_example['field_count']}개 · "
+            f"추천 패널 {len(syslog_example['recommended_panels'])}개"
+        )
+        st.write(" · ".join(syslog_example["recommended_panels"]))
+        if st.button("선택한 Syslog 예시로 바로 설계", type="primary", width="stretch"):
+            table_name = store_mapping.resolve(example_product, example_schema) or "secui_events"
+            st.session_state["dashboard_definition"] = dashboard_designer.design(DashboardDesignRequest(
+                request=syslog_example["request"], manufacturer=example_manufacturer,
+                store_product=example_product, store_schema=example_schema, table_name=table_name,
+                context=RequestContext(product=product),
+            )).model_dump()
+            st.session_state.pop("dashboard_record_id", None)
+            st.rerun()
     dashboard_store = DashboardStore(settings.dashboard_db_path)
     saved_dashboards = dashboard_store.list()
     with st.expander(f"저장된 대시보드 · {len(saved_dashboards)}개"):

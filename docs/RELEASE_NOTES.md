@@ -8,6 +8,7 @@
 - Added shared dashboard variables, query-weight analysis, and performance recommendations.
 - Added a TLS-safe Logpresso deployment-plan boundary that does not mutate the target server.
 - Added saved-dashboard, performance, and deployment-plan controls to the Streamlit dashboard designer.
+- Added catalog-driven dashboard examples for all 470 known Store Syslog schemas, with field-aware panels and safe baseline coverage.
 
 ## 0.1.11 - 2026-09-15
 

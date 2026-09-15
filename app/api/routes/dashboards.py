@@ -22,6 +22,7 @@ def dashboard_templates():
     return {
         "items": designer.templates(),
         "examples": designer.example_requests(),
+        "syslog_examples": designer.product_example_catalog(),
         "product_categories": PRODUCT_TEMPLATES,
     }
 

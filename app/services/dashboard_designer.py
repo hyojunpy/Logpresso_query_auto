@@ -39,6 +39,25 @@ PANEL_META = {
 }
 
 
+PRODUCT_PANEL_RULES = [
+    (("src_ip", "source_ip", "client_ip"), "출발지 IP 상위 10개", "출발지별 이벤트 분포", "bar"),
+    (("dst_ip", "destination_ip", "server_ip"), "목적지 IP 상위 10개", "목적지별 이벤트 분포", "bar"),
+    (("src_port", "source_port"), "출발지 포트 상위 10개", "출발지 포트별 이벤트 분포", "bar"),
+    (("dst_port", "destination_port"), "목적지 포트 상위 10개", "목적지 포트별 이벤트 분포", "bar"),
+    (("action", "act"), "처리 행위별 이벤트", "허용·차단 등 처리 행위 분포", "bar"),
+    (("severity", "risk", "level", "priority"), "위험도별 이벤트", "심각도와 위험 수준별 이벤트 분포", "bar"),
+    (("signature", "attack_name", "threat", "rule_name"), "탐지 유형 상위 10개", "시그니처·공격·위협 유형 분포", "bar"),
+    (("user", "user_name", "username", "account"), "사용자 상위 10명", "사용자별 이벤트 분포", "bar"),
+    (("hostname", "device_name", "host", "asset_name"), "장비/호스트 상위 10개", "장비 또는 호스트별 이벤트 분포", "bar"),
+    (("category", "type", "log_type", "event_type"), "이벤트 유형별 현황", "범주와 이벤트 유형별 분포", "bar"),
+    (("status", "result"), "처리 결과별 현황", "성공·실패 등 결과별 이벤트 분포", "bar"),
+    (("protocol", "service"), "프로토콜/서비스별 현황", "프로토콜 또는 서비스별 분포", "bar"),
+    (("policy", "policy_name", "rule"), "정책 상위 10개", "정책 또는 규칙별 이벤트 분포", "bar"),
+    (("src_country", "source_country"), "출발지 국가 상위 10개", "출발지 국가별 이벤트 분포", "bar"),
+    (("dst_country", "destination_country"), "목적지 국가 상위 10개", "목적지 국가별 이벤트 분포", "bar"),
+]
+
+
 class DashboardDesigner:
     def __init__(self):
         payload = json.loads(files("app.resources").joinpath("dashboard_query_examples.json").read_text(encoding="utf-8"))
@@ -67,6 +86,23 @@ class DashboardDesigner:
             "request": f"{item['title']} 대시보드 만들어줘",
             "panel_count": 1,
         } for index, item in enumerate(self.examples)]]
+
+    def product_example_catalog(self) -> list[dict]:
+        knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
+        rows = []
+        for product in knowledge.payload.get("products", []):
+            for schema in product.get("schemas", []):
+                fields = [str(field.get("name")) for field in schema.get("fields", []) if field.get("name")]
+                rows.append({
+                    "manufacturer": product.get("manufacturer"),
+                    "product": product.get("name"),
+                    "schema": schema.get("name"),
+                    "request": f"{product.get('name')} {schema.get('name')} 보안 대시보드 만들어줘",
+                    "field_count": len(fields),
+                    "coverage": "field-aware" if fields else "baseline",
+                    "recommended_panels": self._recommended_product_panels(set(fields)),
+                })
+        return rows
 
     def design(self, request: DashboardDesignRequest) -> DashboardDefinition:
         if request.store_product:
@@ -126,12 +162,18 @@ class DashboardDesigner:
             request.store_product, request.store_schema
         ) or "secui_events"
         duration = request.default_time_range
-        queries = [("전체 이벤트", "전체 이벤트 건수", "metric", f"table duration={duration} {table}\n| stats count", "건")]
+        base_query = f"table duration={duration} {table}"
+        queries = [("전체 이벤트", "전체 이벤트 건수", "metric", f"{base_query}\n| stats count", "건")]
         if "_time" in fields:
-            queries.append(("이벤트 시간 추이", "시간대별 이벤트 발생 추이", "line", f"table duration={duration} {table}\n| timechart span=1h count", "건"))
-        for field, title in (("src_ip", "출발지 IP 상위 10개"), ("action", "동작별 이벤트"), ("severity", "심각도별 이벤트"), ("status", "상태별 이벤트")):
-            if field in fields:
-                queries.append((title, f"{field} 기준 이벤트 분포", "bar", f"table duration={duration} {table}\n| stats count by {field}\n| sort -count\n| limit 10", "건"))
+            queries.append(("이벤트 시간 추이", "시간대별 이벤트 발생 추이", "line", f"{base_query}\n| timechart span=1h count", "건"))
+        for candidates, title, description, visual in PRODUCT_PANEL_RULES:
+            field = next((candidate for candidate in candidates if candidate in fields), None)
+            if field:
+                queries.append((title, description, visual, f"{base_query}\n| stats count by {field}\n| sort -count\n| limit 10", "건"))
+        volume_field = next((field for field in ("total_bytes", "bytes", "sent_bytes", "recv_bytes", "volume") if field in fields), None)
+        if volume_field:
+            queries.append(("트래픽 사용량 상위 10개", f"{volume_field} 합계가 큰 항목을 확인합니다.", "bar", f"{base_query}\n| stats sum({volume_field}) as volume by src_ip\n| sort -volume\n| limit 10" if "src_ip" in fields else f"{base_query}\n| stats sum({volume_field}) as volume", "bytes"))
+        queries.append(("최근 이벤트", "최근 수집된 Syslog 이벤트를 표로 확인합니다.", "table", f"{base_query}\n| limit 100", None))
         if schema and schema.get("discriminator_field") and schema.get("log_types"):
             field = schema["discriminator_field"]
             values = " or ".join(f'{field} == "{value}"' for value in schema["log_types"])
@@ -147,6 +189,19 @@ class DashboardDesigner:
             scope=DashboardScope(manufacturer=request.manufacturer, product=request.store_product, schema_name=request.store_schema),
             variables=default_variables(duration), panels=panels,
         )
+
+    @staticmethod
+    def _recommended_product_panels(fields: set[str]) -> list[str]:
+        panels = ["전체 이벤트"]
+        if "_time" in fields:
+            panels.append("이벤트 시간 추이")
+        for candidates, title, _, _ in PRODUCT_PANEL_RULES:
+            if any(field in fields for field in candidates):
+                panels.append(title)
+        if any(field in fields for field in ("total_bytes", "bytes", "sent_bytes", "recv_bytes", "volume")):
+            panels.append("트래픽 사용량 상위 10개")
+        panels.append("최근 이벤트")
+        return panels
 
     def _select_examples(self, request: str) -> list[dict]:
         normalized = re.sub(r"\s+", "", request.casefold())

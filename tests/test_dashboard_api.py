@@ -8,6 +8,7 @@ def test_dashboard_design_validate_and_export_api():
     client = TestClient(app)
     templates = client.get("/api/v1/dashboards/templates").json()
     assert len(templates["examples"]) == 9
+    assert len(templates["syslog_examples"]) == 470
     response = client.post("/api/v1/dashboards/design", json={"request": "수집 속도 대시보드"})
     assert response.status_code == 200
     dashboard = response.json()

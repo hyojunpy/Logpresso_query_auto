@@ -27,6 +27,8 @@ def test_product_dashboard_uses_available_schema_fields():
     assert dashboard.scope.product == "AIWAF"
     assert any("src_ip" in panel.query for panel in dashboard.panels)
     assert all("aiwaf_events" in panel.query for panel in dashboard.panels)
+    assert any(panel.title == "최근 이벤트" for panel in dashboard.panels)
+    assert len(dashboard.panels) >= 5
 
 
 def test_dashboard_exports_are_portable_json_and_yaml():
@@ -42,3 +44,10 @@ def test_user_supplied_dashboard_examples_are_exposed_as_presets():
     assert len(examples) == 9
     assert examples[0]["panel_count"] == 8
     assert {item["title"] for item in examples[1:]} >= {"라이선스 만료일", "수집 속도", "전일 수집기별 수집량"}
+
+
+def test_all_store_syslog_schemas_are_exposed_as_dashboard_examples():
+    examples = DashboardDesigner().product_example_catalog()
+    assert len(examples) == 470
+    assert all(item["recommended_panels"] for item in examples)
+    assert {item["coverage"] for item in examples} == {"field-aware", "baseline"}
