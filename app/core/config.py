@@ -21,6 +21,7 @@ class Settings:
     catalog_path: Path = data_dir / "catalog.json"
     store_schema_path: Path = data_dir / "store-schema.json"
     store_table_mapping_path: Path = data_dir / "store-table-mappings.json"
+    dashboard_db_path: Path = data_dir / "dashboards.db"
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")

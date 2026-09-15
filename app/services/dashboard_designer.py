@@ -16,6 +16,7 @@ from app.services.query_validator import QueryValidator
 from app.services.retriever import Retriever
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.dashboard_operations import default_variables
 
 
 PANEL_META = {
@@ -97,7 +98,8 @@ class DashboardDesigner:
         return DashboardDefinition(
             title="Logpresso 운영 현황", description="라이선스와 로그 수집 상태를 한 화면에서 확인합니다.",
             default_time_range=request.default_time_range,
-            refresh_interval_seconds=request.refresh_interval_seconds, panels=panels,
+            refresh_interval_seconds=request.refresh_interval_seconds,
+            variables=default_variables(request.default_time_range), panels=panels,
         )
 
     def _product_dashboard(self, request: DashboardDesignRequest) -> DashboardDefinition:
@@ -128,7 +130,7 @@ class DashboardDesigner:
             description=f"{request.store_schema or request.store_product}의 주요 보안 이벤트를 모니터링합니다.",
             default_time_range=duration, refresh_interval_seconds=request.refresh_interval_seconds,
             scope=DashboardScope(manufacturer=request.manufacturer, product=request.store_product, schema_name=request.store_schema),
-            panels=panels,
+            variables=default_variables(duration), panels=panels,
         )
 
     def _select_examples(self, request: str) -> list[dict]:

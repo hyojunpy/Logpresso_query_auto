@@ -24,6 +24,10 @@ class StreamlitUiTest(unittest.TestCase):
         downloads = [item.label for item in app.get("download_button")]
         assert "대시보드 JSON 다운로드" in downloads
         assert "대시보드 YAML 다운로드" in downloads
+        buttons = [item.label for item in app.button]
+        assert "설계 저장" in buttons
+        assert "Logpresso 배포계획 미리보기" in buttons
+        assert any("성능·비용 점검" in item.label for item in app.expander)
 
     def test_main_screen_uses_product_and_schema_selection_instead_of_examples(self):
         from streamlit.testing.v1 import AppTest

@@ -8,7 +8,7 @@ import streamlit as st
 from app.core.config import settings
 from app.core.ui_auth import LoginAttemptStore, authenticate, hash_password, load_users, session_expired, verify_password
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
-from app.models.dashboard import DashboardDefinition, DashboardDesignRequest, DashboardThreshold
+from app.models.dashboard import DashboardDefinition, DashboardDesignRequest, DashboardThreshold, LogpressoTarget
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.feedback_store import FeedbackStore
@@ -33,6 +33,8 @@ from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
 from app.services.store_table_mapping import StoreTableMapping
 from app.services.dashboard_designer import DashboardDesigner, dashboard_to_yaml
+from app.services.dashboard_operations import analyze_dashboard, deployment_plan
+from app.services.dashboard_store import DashboardStore
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -688,6 +690,30 @@ work_mode = st.radio("작업 유형", ["쿼리 생성", "대시보드 생성"], 
 if work_mode == "대시보드 생성":
     st.subheader("자연어 대시보드 설계")
     st.caption("공통 운영 대시보드 또는 제조사·제품·로그 형식별 보안 대시보드를 설계합니다.")
+    dashboard_store = DashboardStore(settings.dashboard_db_path)
+    saved_dashboards = dashboard_store.list()
+    with st.expander(f"저장된 대시보드 · {len(saved_dashboards)}개"):
+        if saved_dashboards:
+            saved_by_label = {
+                f"{item.title} · r{item.revision} · 패널 {item.panel_count}개": item
+                for item in saved_dashboards
+            }
+            saved_label = st.selectbox("저장된 설계", list(saved_by_label), key="saved_dashboard_choice")
+            saved_item = saved_by_label[saved_label]
+            saved_col1, saved_col2 = st.columns(2)
+            if saved_col1.button("불러오기", width="stretch"):
+                st.session_state["dashboard_definition"] = dashboard_store.get(saved_item.id).dashboard.model_dump()
+                st.session_state["dashboard_record_id"] = saved_item.id
+                st.rerun()
+            if saved_col2.button("복제하여 불러오기", width="stretch"):
+                clone = dashboard_store.clone(saved_item.id)
+                st.session_state["dashboard_definition"] = clone.dashboard.model_dump()
+                st.session_state["dashboard_record_id"] = clone.id
+                st.rerun()
+            revisions = dashboard_store.revisions(saved_item.id)
+            st.dataframe(revisions, width="stretch", hide_index=True)
+        else:
+            st.caption("아직 저장된 대시보드가 없습니다.")
     dashboard_request = st.text_area(
         "대시보드 요청",
         placeholder="예: 라이선스와 로그 수집 상태를 한 화면에서 확인하는 운영 대시보드 만들어줘",
@@ -780,6 +806,14 @@ if work_mode == "대시보드 생성":
         else:
             st.error(f"검증 실패 패널 {dashboard_validation.invalid_panels}개")
         st.dataframe(dashboard_validation.panels, width="stretch", hide_index=True)
+        analysis = analyze_dashboard(dashboard)
+        with st.expander(f"성능·비용 점검 · {analysis.score}점", expanded=bool(analysis.warnings)):
+            st.metric("예상 쿼리 부하", analysis.estimated_query_weight)
+            for warning in analysis.warnings:
+                st.warning(warning)
+            for recommendation in analysis.recommendations:
+                st.info(recommendation)
+            st.dataframe(analysis.panel_details, width="stretch", hide_index=True)
         preview_columns = st.columns(2)
         for index, panel in enumerate(dashboard.panels):
             with preview_columns[index % 2].container(border=True):
@@ -804,6 +838,29 @@ if work_mode == "대시보드 생성":
             mime="application/yaml",
             width="stretch",
         )
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button("설계 저장", width="stretch"):
+            record = dashboard_store.save(
+                export_payload,
+                st.session_state.get("dashboard_record_id"),
+                "웹 편집기에서 저장",
+            )
+            st.session_state["dashboard_record_id"] = record.id
+            st.success(f"저장 완료 · 리비전 {record.revision}")
+        if action_col2.button("Logpresso 배포계획 미리보기", width="stretch"):
+            st.session_state["dashboard_deployment_plan"] = deployment_plan(
+                export_payload,
+                LogpressoTarget(base_url="https://10.11.12.14", verify_tls=True),
+            ).model_dump()
+        if plan := st.session_state.get("dashboard_deployment_plan"):
+            with st.expander("배포계획 · 실제 서버 변경 없음", expanded=True):
+                st.write(f"대상: {plan['target']['base_url']}")
+                st.write(f"위젯 {plan['widget_count']}개 · 변수 {plan['variable_count']}개")
+                for step in plan["steps"]:
+                    st.write(f"- {step}")
+                for warning in plan["warnings"]:
+                    st.warning(warning)
+                st.json(plan["payload"], expanded=False)
         st.session_state["dashboard_definition"] = dashboard.model_dump()
     st.stop()
 

@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.1.13 - 2026-09-15
+
+- Added persisted dashboard drafts with list/load/update/clone/delete operations.
+- Added immutable revisions, JSON diffs, and revision restore.
+- Added firewall, WAF, IPS, VPN, NAC, and EDR dashboard categories.
+- Added shared dashboard variables, query-weight analysis, and performance recommendations.
+- Added a TLS-safe Logpresso deployment-plan boundary that does not mutate the target server.
+- Added saved-dashboard, performance, and deployment-plan controls to the Streamlit dashboard designer.
+
 ## 0.1.11 - 2026-09-15
 
 - Added CSV bulk import/export for real Store table mappings and schema readiness diagnostics.
