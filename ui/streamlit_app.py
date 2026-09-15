@@ -718,7 +718,26 @@ if selected_store_product:
     if mapped_store_table:
         context_parts.append(f"대상 테이블: {mapped_store_table}")
     st.caption(" · ".join(context_parts))
-    if selected_store_schema and not field_count:
+    if selected_store_schema and field_count:
+        field_rows = [
+            {
+                "필드명": field.get("name", ""),
+                "표시명": field.get("display_name", ""),
+                "유형": field.get("type") or field.get("source_type", ""),
+                "설명": field.get("description", ""),
+                "유사어": ", ".join(str(alias) for alias in field.get("aliases", [])),
+            }
+            for field in selected_schema_data.get("fields", [])
+        ]
+        with st.expander(f"선택된 로그 형식 필드 {field_count}개", expanded=True):
+            st.dataframe(
+                field_rows,
+                width="stretch",
+                hide_index=True,
+                height=min(520, 38 + field_count * 35),
+            )
+            st.caption("필드명과 표시명·유사어를 자연어 요청에 사용할 수 있습니다.")
+    elif selected_store_schema:
         st.warning("이 로그 형식은 공개 필드가 없어 제품·형식 힌트 중심으로 생성됩니다.")
 else:
     st.caption("제품을 모르는 경우 선택하지 않고 요청문에 제품명·로그 종류·조건을 직접 적어도 됩니다.")

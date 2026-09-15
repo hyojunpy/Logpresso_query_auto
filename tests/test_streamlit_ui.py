@@ -23,6 +23,16 @@ class StreamlitUiTest(unittest.TestCase):
         self.assertNotIn("빠른 테스트", labels)
         self.assertTrue(any(area.label == "쿼리 요청" for area in app.text_area))
 
+        next(item for item in app.selectbox if item.label == "제조사").select("MONITORAPP").run()
+        next(item for item in app.selectbox if item.label == "Syslog 제품").select("AIWAF").run()
+        next(item for item in app.selectbox if item.label == "로그 형식").select("AIWAF Alert").run()
+
+        self.assertTrue(any(item.label == "선택된 로그 형식 필드 28개" for item in app.expander))
+        field_table = next(item for item in app.dataframe if "필드명" in item.value.columns)
+        self.assertIn("_time", field_table.value["필드명"].tolist())
+        self.assertIn("표시명", field_table.value.columns)
+        self.assertIn("유사어", field_table.value.columns)
+
     def test_clarification_area_clears_after_successful_generation(self):
         from streamlit.testing.v1 import AppTest
 
