@@ -31,14 +31,6 @@ from app.services.metrics_store import MetricsStore, metric_label, operational_o
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
 from app.services.store_table_mapping import StoreTableMapping
-try:
-    # Package import when tests or Python load the app from the repository root.
-    from ui.quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
-except ModuleNotFoundError as error:
-    # Streamlit executes this file directly, placing /app/ui (not /app) on sys.path.
-    if error.name != "ui":
-        raise
-    from quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -302,7 +294,7 @@ with st.sidebar:
         st.success("생성 준비 상태: 준비됨")
     else:
         st.warning("생성 준비 상태: 기준 문서 또는 인덱스를 확인하세요.")
-    product = st.selectbox("제품군", ["ENT", "STD", "SNR", "FRS"], index=0)
+    product = st.selectbox("로그프레소 라이선스 제품군", ["ENT", "STD", "SNR", "FRS"], index=0)
     generation_mode = st.selectbox(
         "생성 모드",
         ["자동", "빠른 규칙 기반", "Ollama 보조"],
@@ -690,40 +682,56 @@ with st.sidebar:
 
 st.title("로그프레소 자연어 쿼리 생성기")
 
-examples = [
-    "최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘",
-    "araqne_query_logs에서 root가 실행한 쿼리를 찾아줘",
-    "araqne_query_logs에서 root 사용자의 실행 건수를 10분 단위로 보여줘",
-    "firewall_logs의 src_ip를 할당ip로 rename해줘",
-    "firewall_logs에서 src_ip, action만 보여줘",
-    "에러 로그 보여줘",
+store_products = store_knowledge.payload.get("products", [])
+manufacturers = list(dict.fromkeys(
+    str(item.get("manufacturer")) for item in store_products if item.get("manufacturer")
+))
+selection_col1, selection_col2 = st.columns(2)
+with selection_col1:
+    selected_manufacturer = st.selectbox("제조사", [""] + manufacturers)
+product_options = [
+    str(item.get("name")) for item in store_products
+    if not selected_manufacturer or item.get("manufacturer") == selected_manufacturer
 ]
-selected = st.selectbox("예제 요청", [""] + examples)
-quick_search = st.text_input("빠른 테스트 검색", placeholder="예: join, fulltext, 로그인 실패")
-quick_category = st.selectbox("빠른 테스트 분류", ["전체"] + list(QUICK_TEST_REQUESTS))
-quick_options = (
-    [request for requests in QUICK_TEST_REQUESTS.values() for request in requests]
-    if quick_category == "전체"
-    else QUICK_TEST_REQUESTS.get(quick_category, [])
+with selection_col2:
+    selected_store_product = st.selectbox("Syslog 제품", [""] + product_options)
+selected_product_data = next(
+    (item for item in store_products if item.get("name") == selected_store_product), None
 )
-if quick_search.strip():
-    quick_options = [request for request in quick_options if quick_search.strip().lower() in request.lower()]
-quick_choice = st.selectbox(
-    "빠른 테스트",
-    [""] + quick_options,
-    format_func=lambda value: f"✅ {value}" if value else "선택하세요",
+schema_options = [str(item.get("name")) for item in (selected_product_data or {}).get("schemas", [])]
+selected_store_schema = st.selectbox(
+    "로그 형식",
+    [""] + schema_options,
+    disabled=not selected_store_product,
+    help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
 )
-quick_preset = build_quick_test_preset(quick_choice) if quick_choice else {}
-if quick_preset:
-    st.success("즉시 생성 가능 · 샘플 스키마 자동 적용")
-    st.caption("테이블별 필드와 실시간 소스 힌트를 분리해 적용합니다.")
+mapped_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+selected_schema_data = next(
+    (item for item in (selected_product_data or {}).get("schemas", []) if item.get("name") == selected_store_schema),
+    None,
+)
+if selected_store_product:
+    field_count = len((selected_schema_data or {}).get("fields", []))
+    context_parts = [f"선택 제품: {selected_store_product}"]
+    if selected_store_schema:
+        context_parts.extend([f"로그 형식: {selected_store_schema}", f"공개 필드: {field_count}개"])
+    if mapped_store_table:
+        context_parts.append(f"대상 테이블: {mapped_store_table}")
+    st.caption(" · ".join(context_parts))
+    if selected_store_schema and not field_count:
+        st.warning("이 로그 형식은 공개 필드가 없어 제품·형식 힌트 중심으로 생성됩니다.")
 else:
-    st.caption(
-        f"{quick_test_count()}개 복합 예시를 분류별로 제공합니다. "
-        "현재 제공되는 모든 빠른 테스트는 자동 생성 검증을 통과했습니다."
-    )
-default_request = quick_preset.get("request") or selected or st.session_state.get("request_text", "")
-request_text = st.text_area("사용자 요청", value=default_request, height=130)
+    st.caption("제품을 모르는 경우 선택하지 않고 요청문에 제품명·로그 종류·조건을 직접 적어도 됩니다.")
+
+request_placeholder = "예: 최근 24시간 출발지 IP별 차단 건수를 많은 순으로 20개 보여줘"
+if selected_store_schema:
+    request_placeholder = f"예: 최근 24시간 {selected_store_schema}에서 출발지 IP별 건수를 보여줘"
+request_text = st.text_area(
+    "쿼리 요청",
+    value=st.session_state.get("request_text", ""),
+    height=130,
+    placeholder=request_placeholder,
+)
 with st.expander("생성 전 해석 편집", expanded=False):
     st.caption("자연어 해석이 다를 때 이 값만 보완해 다시 생성할 수 있습니다.")
     interpretation_tables = st.text_input("테이블", placeholder="예: firewall_logs, insa")
@@ -743,23 +751,6 @@ def request_fingerprint(text: str, context: RequestContext) -> str:
 def current_context() -> RequestContext:
     catalog_tables = active_catalog.tables if active_catalog else []
     request_tables = request_schema_catalog.tables if request_schema_catalog else []
-    quick_catalog = None
-    quick_source_fields = {
-        **quick_preset.get("table_fields", {}),
-        **quick_preset.get("stream_fields", {}),
-        **quick_preset.get("logger_fields", {}),
-    }
-    if quick_source_fields:
-        quick_catalog = Catalog(
-            source="fixture",
-            tables=[
-                CatalogTable(
-                    table_name=table_name,
-                    fields=[CatalogField(field_name=field_name) for field_name in fields],
-                )
-                for table_name, fields in quick_source_fields.items()
-            ],
-        )
     return RequestContext(
         product=product,
         version=version or None,
@@ -768,27 +759,25 @@ def current_context() -> RequestContext:
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_tables.split(",") if value.strip()]
-            + quick_preset.get("tables", [])
+            + ([mapped_store_table] if mapped_store_table else [])
             + st.session_state.get("learned_tables", [])
             + [table.table_name for table in catalog_tables + request_tables]
         )),
         known_fields=list(dict.fromkeys(
             [line.strip() for line in known_fields.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_fields.split(",") if value.strip()]
-            + quick_preset.get("fields", [])
+            + [str(field.get("name")) for field in (selected_schema_data or {}).get("fields", []) if field.get("name")]
             + st.session_state.get("learned_fields", [])
             + [field.field_name for table in catalog_tables + request_tables for field in table.fields]
         )),
         known_loggers=list(dict.fromkeys(
             [line.strip() for line in known_loggers.splitlines() if line.strip()]
-            + quick_preset.get("loggers", [])
         )),
         known_streams=list(dict.fromkeys(
             [line.strip() for line in known_streams.splitlines() if line.strip()]
-            + quick_preset.get("streams", [])
         )),
         catalog=active_catalog,
-        request_catalog=request_schema_catalog or quick_catalog,
+        request_catalog=request_schema_catalog,
     )
 
 
