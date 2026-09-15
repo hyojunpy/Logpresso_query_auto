@@ -66,6 +66,20 @@ def test_explicit_product_and_schema_hints_select_catalog_without_names_in_reque
     assert ("출발지 IP", "src_ip") in match.replacements
 
 
+def test_field_display_names_and_aliases_are_case_insensitive():
+    knowledge = StoreSchemaKnowledge.bundled()
+    payload = GenerateQueryRequest(
+        request="최근 24시간 SrC Ip별 건수를 보여줘",
+        context=RequestContext(
+            known_tables=["secui_events"],
+            store_product="AIWAF",
+            store_schema="AIWAF Alert",
+        ),
+    )
+    enriched = knowledge.enrich(payload)
+    assert "src_ip별" in enriched.request
+
+
 def test_search_supports_korean_aliases_and_typo_similarity():
     knowledge = StoreSchemaKnowledge.bundled()
     assert any(item["product"] == "FortiGate" for item in knowledge.search("포티게이트 웹필터"))

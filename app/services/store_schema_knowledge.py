@@ -329,12 +329,19 @@ class StoreSchemaKnowledge:
         return list(fields_by_name.values())
 
     def _field_replacements(self, text: str, fields: list[dict[str, Any]]) -> list[tuple[str, str]]:
-        aliases: dict[str, set[str]] = {}
+        aliases: dict[str, dict[str, set[str]]] = {}
         for field in fields:
             for alias in field.get("aliases", []):
                 if self._field_alias_match(text, alias):
-                    aliases.setdefault(alias, set()).add(field["name"])
-        replacements = [(alias, next(iter(names))) for alias, names in aliases.items() if len(names) == 1]
+                    normalized = str(alias).casefold()
+                    entry = aliases.setdefault(normalized, {"phrases": set(), "names": set()})
+                    entry["phrases"].add(str(alias))
+                    entry["names"].add(field["name"])
+        replacements = [
+            (max(entry["phrases"], key=len), next(iter(entry["names"])))
+            for entry in aliases.values()
+            if len(entry["names"]) == 1
+        ]
         replacements.sort(key=lambda item: len(item[0]), reverse=True)
         accepted: list[tuple[str, str]] = []
         occupied: list[tuple[int, int]] = []
