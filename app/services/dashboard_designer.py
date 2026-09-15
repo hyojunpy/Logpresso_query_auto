@@ -53,6 +53,21 @@ class DashboardDesigner:
             {"id": "product-security", "title": "제품별 보안 이벤트", "scope": "product", "panel_count": "dynamic"},
         ]
 
+    def example_requests(self) -> list[dict]:
+        return [{
+            "id": "operations-all",
+            "title": "통합 운영 현황",
+            "description": "사용자가 제공한 운영 지표 8종을 한 화면에 구성합니다.",
+            "request": "라이선스와 로그 수집 상태 운영 대시보드 만들어줘",
+            "panel_count": len(self.examples),
+        }, *[{
+            "id": f"operations-{index + 1}",
+            "title": item["title"],
+            "description": item["description"],
+            "request": f"{item['title']} 대시보드 만들어줘",
+            "panel_count": 1,
+        } for index, item in enumerate(self.examples)]]
+
     def design(self, request: DashboardDesignRequest) -> DashboardDefinition:
         if request.store_product:
             dashboard = self._product_dashboard(request)

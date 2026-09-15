@@ -35,3 +35,10 @@ def test_dashboard_exports_are_portable_json_and_yaml():
     yaml = dashboard_to_yaml(dashboard)
     assert 'title: "Logpresso 운영 현황"' in yaml
     assert "panels:" in yaml
+
+
+def test_user_supplied_dashboard_examples_are_exposed_as_presets():
+    examples = DashboardDesigner().example_requests()
+    assert len(examples) == 9
+    assert examples[0]["panel_count"] == 8
+    assert {item["title"] for item in examples[1:]} >= {"라이선스 만료일", "수집 속도", "전일 수집기별 수집량"}

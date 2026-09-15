@@ -15,6 +15,8 @@ class StreamlitUiTest(unittest.TestCase):
         app = AppTest.from_file(str(Path("ui") / "streamlit_app.py"), default_timeout=30)
         app.run()
         next(item for item in app.radio if item.label == "작업 유형").set_value("대시보드 생성").run()
+        assert any(item.label == "대시보드 예시" for item in app.selectbox)
+        assert any(item.label == "선택한 예시로 바로 설계" for item in app.button)
         next(item for item in app.text_area if item.label == "대시보드 요청").set_value(
             "라이선스와 로그 수집 상태 운영 대시보드 만들어줘"
         )

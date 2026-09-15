@@ -18,7 +18,12 @@ def store():
 
 @router.get("/templates")
 def dashboard_templates():
-    return {"items": DashboardDesigner().templates(), "product_categories": PRODUCT_TEMPLATES}
+    designer = DashboardDesigner()
+    return {
+        "items": designer.templates(),
+        "examples": designer.example_requests(),
+        "product_categories": PRODUCT_TEMPLATES,
+    }
 
 
 @router.get("")

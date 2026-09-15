@@ -690,6 +690,26 @@ work_mode = st.radio("작업 유형", ["쿼리 생성", "대시보드 생성"], 
 if work_mode == "대시보드 생성":
     st.subheader("자연어 대시보드 설계")
     st.caption("공통 운영 대시보드 또는 제조사·제품·로그 형식별 보안 대시보드를 설계합니다.")
+    dashboard_designer = DashboardDesigner()
+    dashboard_examples = dashboard_designer.example_requests()
+    example_by_label = {
+        f"{item['title']} · 패널 {item['panel_count']}개": item
+        for item in dashboard_examples
+    }
+    with st.expander(f"제공받은 운영 대시보드 예시 · {len(dashboard_examples) - 1}종", expanded=True):
+        example_label = st.selectbox(
+            "대시보드 예시",
+            list(example_by_label),
+            help="통합 운영 현황은 아래 8개 예시를 하나의 대시보드로 구성합니다.",
+        )
+        selected_example = example_by_label[example_label]
+        st.caption(selected_example["description"])
+        if st.button("선택한 예시로 바로 설계", type="primary", width="stretch"):
+            st.session_state["dashboard_definition"] = dashboard_designer.design(DashboardDesignRequest(
+                request=selected_example["request"], context=RequestContext(product=product),
+            )).model_dump()
+            st.session_state.pop("dashboard_record_id", None)
+            st.rerun()
     dashboard_store = DashboardStore(settings.dashboard_db_path)
     saved_dashboards = dashboard_store.list()
     with st.expander(f"저장된 대시보드 · {len(saved_dashboards)}개"):
@@ -750,7 +770,7 @@ if work_mode == "대시보드 생성":
     with setting_col3:
         dashboard_refresh = st.number_input("새로고침 주기 초", min_value=30, max_value=86400, value=300, step=30)
     if st.button("대시보드 설계", type="primary", disabled=not dashboard_request.strip()):
-        st.session_state["dashboard_definition"] = DashboardDesigner().design(DashboardDesignRequest(
+        st.session_state["dashboard_definition"] = dashboard_designer.design(DashboardDesignRequest(
             request=dashboard_request,
             manufacturer=dashboard_manufacturer or None,
             store_product=dashboard_product or None,
