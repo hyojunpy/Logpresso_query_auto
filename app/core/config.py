@@ -43,6 +43,13 @@ class Settings:
     verification_url: str | None = os.getenv("LOGPRESSO_VERIFICATION_URL") or None
     verification_token: str | None = os.getenv("LOGPRESSO_VERIFICATION_TOKEN") or None
     verification_timeout_seconds: float = max(1.0, min(float(os.getenv("LOGPRESSO_VERIFICATION_TIMEOUT_SECONDS", "10")), 30.0))
+    logpresso_base_url: str | None = os.getenv("LOGPRESSO_BASE_URL") or None
+    logpresso_api_key: str | None = os.getenv("LOGPRESSO_API_KEY") or None
+    logpresso_verify_tls: bool = os.getenv("LOGPRESSO_VERIFY_TLS", "true").lower() in {"1", "true", "yes"}
+    logpresso_timeout_seconds: float = max(1.0, min(float(os.getenv("LOGPRESSO_TIMEOUT_SECONDS", "15")), 60.0))
+    logpresso_snapshot_path: Path = data_dir / "logpresso-environment.json"
+    # Remote mutation is intentionally disabled. A future write adapter must require an explicit review gate.
+    logpresso_write_enabled: bool = False
     # Optional shared-deployment boundary. Leave unset for local single-user use.
     management_api_key: str | None = os.getenv("MANAGEMENT_API_KEY") or None
     ui_auth_enabled: bool = os.getenv("UI_AUTH_ENABLED", "false").lower() in {"1", "true", "yes"}

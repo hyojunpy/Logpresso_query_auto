@@ -69,6 +69,7 @@ class DashboardDesigner:
     def templates(self) -> list[dict]:
         return [
             {"id": "operations", "title": "Logpresso 운영 현황", "scope": "common", "panel_count": len(self.examples)},
+            {"id": "collection-health", "title": "수집기 상태 및 유실 현황", "scope": "environment", "panel_count": 4},
             {"id": "product-security", "title": "제품별 보안 이벤트", "scope": "product", "panel_count": "dynamic"},
         ]
 
@@ -79,6 +80,12 @@ class DashboardDesigner:
             "description": "사용자가 제공한 운영 지표 8종을 한 화면에 구성합니다.",
             "request": "라이선스와 로그 수집 상태 운영 대시보드 만들어줘",
             "panel_count": len(self.examples),
+        }, {
+            "id": "collection-health",
+            "title": "수집기 상태 및 유실 현황",
+            "description": "실제 수집기의 중지·오류·수집량·유실량을 점검합니다.",
+            "request": "수집기 상태와 오류, 수집량, 유실 현황 대시보드 만들어줘",
+            "panel_count": 4,
         }, *[{
             "id": f"operations-{index + 1}",
             "title": item["title"],
@@ -137,6 +144,8 @@ class DashboardDesigner:
         return dashboard, result
 
     def _operations_dashboard(self, request: DashboardDesignRequest) -> DashboardDefinition:
+        if any(word in request.request for word in ("유실", "드롭", "수집기 상태", "수집기 오류")):
+            return self._collection_health_dashboard(request)
         selected = self._select_examples(request.request)
         panels = []
         for index, example in enumerate(selected):
@@ -151,6 +160,29 @@ class DashboardDesigner:
             default_time_range=request.default_time_range,
             refresh_interval_seconds=request.refresh_interval_seconds,
             variables=default_variables(request.default_time_range), panels=panels,
+        )
+
+    def _collection_health_dashboard(self, request: DashboardDesignRequest) -> DashboardDefinition:
+        duration = request.default_time_range
+        rows = [
+            ("중지·오류 수집기", "현재 정상 실행 중이 아닌 수집기를 확인합니다.", "table",
+             'sonar loggers\n| search status != "running" or isnotnull(failure)\n| fields name, table_name, status, failure, asset_ip, hostname', None),
+            ("수집 상태", "수집기 상태별 개수를 확인합니다.", "bar",
+             "sonar loggers\n| stats count by status\n| sort -count", "개"),
+            ("수집량 상위 수집기", "기간 내 수집량이 큰 수집기를 확인합니다.", "bar",
+             f"table duration={duration} *:sys_logger_stats\n| stats sum(volume) as volume by logger_name\n| sort -volume\n| limit 10", "bytes"),
+            ("로그 유실 현황", "수집기별 누적 유실 건수와 용량을 확인합니다.", "table",
+             "sonar loggers\n| fields name, table_name, drop_count, drop_volume\n| sort -drop_count\n| limit 100", None),
+        ]
+        panels = [DashboardPanel(
+            id=f"collection-health-{index + 1}", title=title, description=description,
+            visualization=visual, query=query, unit=unit, layout=self._layout(index),
+        ) for index, (title, description, visual, query, unit) in enumerate(rows)]
+        return DashboardDefinition(
+            title="Logpresso 수집기 상태 및 유실 현황",
+            description="실제 운영 환경의 수집 중단, 오류, 수집량과 로그 유실을 확인합니다.",
+            default_time_range=duration, refresh_interval_seconds=request.refresh_interval_seconds,
+            variables=default_variables(duration), panels=panels,
         )
 
     def _product_dashboard(self, request: DashboardDesignRequest) -> DashboardDefinition:

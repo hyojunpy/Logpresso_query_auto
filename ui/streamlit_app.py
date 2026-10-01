@@ -32,12 +32,33 @@ from app.services.metrics_store import MetricsStore, metric_label, operational_o
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.logpresso_environment import (
+    LogpressoClient, LogpressoConnectionError, LogpressoEnvironmentStore,
+    resolve_synced_table, suggest_table_mappings,
+)
 from app.services.dashboard_designer import DashboardDesigner, dashboard_to_yaml
 from app.services.dashboard_operations import analyze_dashboard, deployment_plan
 from app.services.dashboard_store import DashboardStore
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    .block-container {max-width: 1180px; padding-top: 2rem; padding-bottom: 4rem;}
+    [data-testid="stSidebar"] {min-width: 300px; max-width: 340px;}
+    [data-testid="stSidebar"] h2 {font-size: 1.05rem;}
+    [data-testid="stMetric"] {background: #f7f9fc; border: 1px solid #e7ebf0; border-radius: 12px; padding: .75rem 1rem;}
+    [data-testid="stExpander"] {border-color: #e5e9ef; border-radius: 12px;}
+    div.stButton > button[kind="primary"] {min-height: 2.8rem; font-weight: 700;}
+    .app-eyebrow {color: #64748b; font-size: .85rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;}
+    .app-lead {color: #64748b; margin-top: -.6rem; margin-bottom: 1.5rem;}
+    .section-kicker {color: #475569; font-size: .9rem; font-weight: 700; margin-bottom: .25rem;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def require_login() -> None:
@@ -168,6 +189,7 @@ status = index.status(settings.doc_path)
 catalog_service = CatalogService(settings.catalog_path)
 store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
 store_mapping = StoreTableMapping(settings.store_table_mapping_path)
+environment_store = LogpressoEnvironmentStore(settings.logpresso_snapshot_path)
 
 
 def load_uploaded_catalog(uploaded_file) -> Catalog | None:
@@ -255,8 +277,51 @@ def catalog_from_rows(rows, previous: Catalog | None) -> Catalog:
         function_type_rules=previous.function_type_rules if previous else [],
     )
 
-with st.sidebar:
-    st.subheader("상태")
+with st.sidebar.expander("고급 설정 · 운영 관리", expanded=False):
+    st.caption("관리자와 고급 사용자를 위한 설정입니다. 일반 쿼리 생성에는 열 필요가 없습니다.")
+    with st.expander("Logpresso 환경 동기화", expanded=False):
+        snapshot = environment_store.load()
+        if settings.logpresso_base_url and settings.logpresso_api_key:
+            st.success("연결 정보 설정됨 · 읽기 전용")
+            st.caption(settings.logpresso_base_url)
+        else:
+            st.warning(".env에 LOGPRESSO_BASE_URL과 LOGPRESSO_API_KEY를 설정하세요.")
+        if snapshot.get("synced_at"):
+            summary = snapshot.get("summary", {})
+            st.caption(f"최근 동기화: {snapshot['synced_at']}")
+            cols = st.columns(4)
+            cols[0].metric("수집기", summary.get("total", 0))
+            cols[1].metric("실행", summary.get("running", 0))
+            cols[2].metric("중지", summary.get("stopped", 0))
+            cols[3].metric("오류", summary.get("failed", 0))
+            st.dataframe(snapshot.get("loggers", []), use_container_width=True, hide_index=True)
+            if snapshot.get("partial_failures"):
+                st.warning("일부 항목은 API 권한 또는 서버 버전 때문에 동기화하지 못했습니다.")
+        if st.button(
+            "환경 연결 및 동기화", key="sync_logpresso_environment",
+            disabled=not (settings.logpresso_base_url and settings.logpresso_api_key and has_role("editor", "admin")),
+        ):
+            try:
+                snapshot = environment_store.sync(LogpressoClient(
+                    settings.logpresso_base_url or "", settings.logpresso_api_key or "",
+                    verify_tls=settings.logpresso_verify_tls, timeout=settings.logpresso_timeout_seconds,
+                ))
+            except (LogpressoConnectionError, ValueError) as error:
+                st.error(str(error))
+            else:
+                st.success(f"수집기 {snapshot['summary']['total']}개를 동기화했습니다.")
+                st.rerun()
+        suggestions = suggest_table_mappings(snapshot.get("loggers", []), store_knowledge.payload.get("products", []))
+        if suggestions:
+            st.caption("제품과 실제 수집기 이름을 비교한 테이블 매핑 후보입니다.")
+            st.dataframe(suggestions, use_container_width=True, hide_index=True)
+            if st.button("추천 매핑 적용", disabled=not has_role("editor", "admin")):
+                for item in suggestions:
+                    store_mapping.save(item["product"], item["table"])
+                st.success(f"추천 매핑 {len(suggestions)}개를 적용했습니다.")
+                st.rerun()
+        st.caption("보안상 수집기 생성·수정·활성화 같은 원격 쓰기 기능은 비활성화되어 있습니다.")
+    st.subheader("시스템 상태")
     st.write(f"LLM provider: `{settings.llm_provider}`")
     st.write(f"LLM model: `{settings.ollama_model if settings.llm_provider == 'ollama' else settings.openai_model}`")
     st.caption("모델 변경은 `.env`의 `OLLAMA_MODEL` 또는 `OPENAI_MODEL`을 바꾼 뒤 서버를 재시작하면 적용됩니다.")
@@ -684,19 +749,101 @@ with st.sidebar:
                         hide_index=True,
                     )
 
-st.title("로그프레소 자연어 쿼리 생성기")
+st.markdown('<div class="app-eyebrow">LOGPRESSO ASSISTANT</div>', unsafe_allow_html=True)
+st.title("필요한 로그를 자연어로 조회하세요")
+st.markdown(
+    '<div class="app-lead">제품과 로그 형식을 선택하고 원하는 내용을 입력하면 검증된 Logpresso 쿼리 또는 대시보드 초안을 만듭니다.</div>',
+    unsafe_allow_html=True,
+)
 
-work_mode = st.radio("작업 유형", ["쿼리 생성", "대시보드 생성"], horizontal=True)
+work_mode = st.radio(
+    "작업 유형",
+    ["쿼리 생성", "대시보드 생성", "환경 정보"],
+    horizontal=True,
+    captions=["로그 검색·집계 쿼리", "여러 패널로 구성된 화면", "실제 수집기·테이블·필드 조회"],
+)
+if work_mode == "환경 정보":
+    snapshot = environment_store.load()
+    st.subheader("Logpresso 환경 정보")
+    if not snapshot.get("synced_at"):
+        st.warning("아직 동기화된 정보가 없습니다. 왼쪽 고급 설정에서 환경 연결 및 동기화를 실행하세요.")
+        st.stop()
+    summary = snapshot.get("summary", {})
+    st.caption(f"최근 동기화: {snapshot['synced_at']} · 읽기 전용 스냅샷")
+    metrics = st.columns(5)
+    metrics[0].metric("수집기", summary.get("total", 0))
+    metrics[1].metric("실행 중", summary.get("running", 0))
+    metrics[2].metric("테이블", len(snapshot.get("tables", [])))
+    metrics[3].metric("로그 스키마", len(snapshot.get("schemas", [])))
+    metrics[4].metric("필드", len(snapshot.get("schema_fields", [])))
+    search = st.text_input("환경 정보 검색", placeholder="수집기명, 테이블명, 스키마, 필드 표시명 검색")
+
+    def filtered_rows(rows: list[dict]) -> list[dict]:
+        needle = search.strip().casefold()
+        if not needle:
+            return rows
+        return [row for row in rows if needle in " ".join(str(value) for value in row.values()).casefold()]
+
+    logger_tab, table_tab, schema_tab, parser_tab, model_tab = st.tabs(
+        ["수집기", "테이블", "스키마·필드", "파서", "수집기 모델"]
+    )
+    with logger_tab:
+        logger_rows = filtered_rows(snapshot.get("loggers", []))
+        st.caption(f"{len(logger_rows)}개 · 상태와 수집량, 연결된 실제 테이블을 확인합니다.")
+        st.dataframe(logger_rows, use_container_width=True, hide_index=True)
+    with table_tab:
+        table_rows = []
+        for table in snapshot.get("tables", []):
+            row = dict(table)
+            row["logger_count"] = sum(
+                logger.get("table_name") == table.get("table_name") for logger in snapshot.get("loggers", [])
+            )
+            table_rows.append(row)
+        table_rows = filtered_rows(table_rows)
+        st.caption(f"{len(table_rows)}개 · 보존 기간과 저장 크기, 연결 수집기 수를 확인합니다.")
+        st.dataframe(table_rows, use_container_width=True, hide_index=True)
+    with schema_tab:
+        schemas = snapshot.get("schemas", [])
+        schema_by_code = {str(item.get("code")): item for item in schemas}
+        schema_options = [""] + [str(item.get("code")) for item in schemas]
+        selected_schema_code = st.selectbox(
+            "로그 스키마 선택", schema_options,
+            format_func=lambda code: "전체 스키마" if not code else f"{schema_by_code[code].get('name')} ({code})",
+        )
+        schema_rows = filtered_rows([
+            {**schema, "field_count": sum(field.get("schema_code") == schema.get("code") for field in snapshot.get("schema_fields", []))}
+            for schema in schemas
+            if not selected_schema_code or schema.get("code") == selected_schema_code
+        ])
+        st.dataframe(schema_rows, use_container_width=True, hide_index=True)
+        field_rows = [
+            field for field in snapshot.get("schema_fields", [])
+            if not selected_schema_code or field.get("schema_code") == selected_schema_code
+        ]
+        field_rows = filtered_rows(field_rows)
+        st.caption(f"필드 {len(field_rows)}개 · 필드명, 표시명, 자료형을 조회할 수 있습니다.")
+        st.dataframe(field_rows, use_container_width=True, hide_index=True)
+    with parser_tab:
+        parser_rows = filtered_rows(snapshot.get("parsers", []))
+        st.caption(f"{len(parser_rows)}개")
+        st.dataframe(parser_rows, use_container_width=True, hide_index=True)
+    with model_tab:
+        model_rows = filtered_rows(snapshot.get("logger_models", []))
+        st.caption(f"{len(model_rows)}개 · 민감 설정 원문은 표시하지 않습니다.")
+        st.dataframe(model_rows, use_container_width=True, hide_index=True)
+    if snapshot.get("partial_failures"):
+        st.warning("일부 메타데이터는 API 권한 또는 서버 버전 때문에 동기화되지 않았습니다.")
+    st.stop()
 if work_mode == "대시보드 생성":
-    st.subheader("자연어 대시보드 설계")
-    st.caption("공통 운영 대시보드 또는 제조사·제품·로그 형식별 보안 대시보드를 설계합니다.")
+    st.subheader("대시보드 만들기")
+    st.caption("필요한 화면을 설명하거나 준비된 예시에서 시작하세요.")
     dashboard_designer = DashboardDesigner()
     dashboard_examples = dashboard_designer.example_requests()
     example_by_label = {
         f"{item['title']} · 패널 {item['panel_count']}개": item
         for item in dashboard_examples
     }
-    with st.expander(f"제공받은 운영 대시보드 예시 · {len(dashboard_examples) - 1}종", expanded=True):
+    with st.expander(f"빠른 시작 · 운영 대시보드 {len(dashboard_examples) - 1}종", expanded=False):
         example_label = st.selectbox(
             "대시보드 예시",
             list(example_by_label),
@@ -711,7 +858,7 @@ if work_mode == "대시보드 생성":
             st.session_state.pop("dashboard_record_id", None)
             st.rerun()
     syslog_examples = dashboard_designer.product_example_catalog()
-    with st.expander(f"고객사 Syslog 대시보드 예시 · {len(syslog_examples)}종", expanded=True):
+    with st.expander(f"빠른 시작 · 제품별 Syslog 대시보드 {len(syslog_examples)}종", expanded=False):
         example_manufacturers = list(dict.fromkeys(
             str(item["manufacturer"]) for item in syslog_examples if item.get("manufacturer")
         ))
@@ -924,7 +1071,8 @@ store_products = store_knowledge.payload.get("products", [])
 manufacturers = list(dict.fromkeys(
     str(item.get("manufacturer")) for item in store_products if item.get("manufacturer")
 ))
-selection_col1, selection_col2 = st.columns(2)
+st.markdown('<div class="section-kicker">1 · 조회 대상</div>', unsafe_allow_html=True)
+selection_col1, selection_col2, selection_col3 = st.columns(3)
 with selection_col1:
     selected_manufacturer = st.selectbox("제조사", [""] + manufacturers)
 product_options = [
@@ -937,20 +1085,25 @@ selected_product_data = next(
     (item for item in store_products if item.get("name") == selected_store_product), None
 )
 schema_options = [str(item.get("name")) for item in (selected_product_data or {}).get("schemas", [])]
-selected_store_schema = st.selectbox(
-    "로그 형식",
-    [""] + schema_options,
-    disabled=not selected_store_product,
-    help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
+with selection_col3:
+    selected_store_schema = st.selectbox(
+        "로그 형식",
+        [""] + schema_options,
+        disabled=not selected_store_product,
+        help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
+    )
+saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None) or resolve_synced_table(
+    environment_store.load(), selected_store_product
 )
-saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
-query_store_table = st.text_input(
-    "조회 테이블",
-    value=saved_store_table or ("secui_events" if selected_store_product else ""),
-    disabled=not selected_store_product,
-    help="테스트 기본값은 secui_events입니다. 실제 환경의 테이블명이 다르면 변경하세요.",
-    key=f"query_store_table::{selected_store_product}::{selected_store_schema}",
-)
+with st.expander("조회 테이블 변경", expanded=False):
+    st.caption("저장된 매핑이 없을 때만 실제 Logpresso 테이블명을 확인해 주세요.")
+    query_store_table = st.text_input(
+        "조회 테이블",
+        value=saved_store_table or ("secui_events" if selected_store_product else ""),
+        disabled=not selected_store_product,
+        help="테스트 기본값은 secui_events입니다. 실제 환경의 테이블명이 다르면 변경하세요.",
+        key=f"query_store_table::{selected_store_product}::{selected_store_schema}",
+    )
 mapped_store_table = query_store_table.strip() or None
 selected_schema_data = next(
     (item for item in (selected_product_data or {}).get("schemas", []) if item.get("name") == selected_store_schema),
@@ -977,7 +1130,7 @@ if selected_store_product:
             }
             for field in selected_schema_data.get("fields", [])
         ]
-        with st.expander(f"선택된 로그 형식 필드 {field_count}개", expanded=True):
+        with st.expander(f"선택된 로그 형식 필드 {field_count}개", expanded=False):
             st.dataframe(
                 field_rows,
                 width="stretch",
@@ -988,8 +1141,9 @@ if selected_store_product:
     elif selected_store_schema:
         st.warning("이 로그 형식은 공개 필드가 없어 제품·형식 힌트 중심으로 생성됩니다.")
 else:
-    st.caption("제품을 모르는 경우 선택하지 않고 요청문에 제품명·로그 종류·조건을 직접 적어도 됩니다.")
+    st.caption("제품을 몰라도 괜찮습니다. 아래 요청에 제품명이나 로그 종류를 함께 적어 주세요.")
 
+st.markdown('<div class="section-kicker">2 · 원하는 결과</div>', unsafe_allow_html=True)
 request_placeholder = "예: 최근 24시간 출발지 IP별 차단 건수를 많은 순으로 20개 보여줘"
 if selected_store_schema:
     request_placeholder = f"예: 최근 24시간 {selected_store_schema}에서 출발지 IP별 건수를 보여줘"
@@ -1256,7 +1410,7 @@ if response:
         versions = st.session_state.get("query_versions", [])
         if isinstance(version_to_restore, int) and 0 <= version_to_restore < len(versions):
             st.session_state["editable_query"] = versions[version_to_restore]
-    tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조", "구조화 요청", "디버그"])
+    tabs = st.tabs(["생성 쿼리", "설명", "검증", "근거", "고급 정보"])
     with tabs[0]:
         if needs_clarification:
             for question in response.get("questions", []):
@@ -1399,7 +1553,7 @@ if response:
     with tabs[4]:
         st.graphviz_chart(query_structure_dot(response.get("intent") or {}), use_container_width=True)
         st.caption("이 화면은 생성 계획을 시각화한 것이며, Logpresso 실행을 수행하지 않습니다.")
-    with tabs[5]:
+    with tabs[4]:
         debug = response.get("debug", {})
         if response.get("assumptions") or debug.get("llm_intent_fallback"):
             st.subheader("AI 해석 결과")
@@ -1408,27 +1562,26 @@ if response:
             for assumption in response.get("assumptions", []):
                 st.warning(f"추정: {assumption}")
         st.json(response.get("intent", {}))
-    with tabs[6]:
-        st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
+        with st.expander("디버그 데이터"):
+            st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
 
-    st.divider()
-    st.subheader("생성 결과 피드백")
-    feedback_rating = st.selectbox("평가", ["positive", "neutral", "negative"], format_func={"positive": "좋음", "neutral": "보통", "negative": "개선 필요"}.get)
-    feedback_issue = st.selectbox("문제 유형", ["", "wrong_table", "wrong_field", "wrong_time_range", "invalid_syntax", "unsafe_query", "irrelevant_query", "other"], format_func=lambda value: "선택 안 함" if not value else value)
-    feedback_comment = st.text_area("의견", max_chars=1000)
-    if st.button("피드백 저장"):
-        saved = FeedbackStore(settings.db_path).save(
-            FeedbackRequest(
-                request_text=request_text,
-                generated_query=response.get("query"),
-                result_status=response.get("status", "unknown"),
-                rating=feedback_rating,
-                issue_type=feedback_issue or None,
-                feedback_comment=feedback_comment or None,
+    with st.expander("생성 결과 피드백", expanded=False):
+        feedback_rating = st.selectbox("평가", ["positive", "neutral", "negative"], format_func={"positive": "좋음", "neutral": "보통", "negative": "개선 필요"}.get)
+        feedback_issue = st.selectbox("문제 유형", ["", "wrong_table", "wrong_field", "wrong_time_range", "invalid_syntax", "unsafe_query", "irrelevant_query", "other"], format_func=lambda value: "선택 안 함" if not value else value)
+        feedback_comment = st.text_area("의견", max_chars=1000)
+        if st.button("피드백 저장"):
+            saved = FeedbackStore(settings.db_path).save(
+                FeedbackRequest(
+                    request_text=request_text,
+                    generated_query=response.get("query"),
+                    result_status=response.get("status", "unknown"),
+                    rating=feedback_rating,
+                    issue_type=feedback_issue or None,
+                    feedback_comment=feedback_comment or None,
+                )
             )
-        )
-        st.success(f"피드백 #{saved['id']}가 저장되었습니다.")
-        st.caption("원문 요청과 쿼리는 저장하지 않았습니다.")
+            st.success(f"피드백 #{saved['id']}가 저장되었습니다.")
+            st.caption("원문 요청과 쿼리는 저장하지 않았습니다.")
 
 with st.expander("기존 쿼리 분석"):
     analysis_query = st.text_area("분석할 Logpresso 쿼리", height=140)

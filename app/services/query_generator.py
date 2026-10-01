@@ -20,6 +20,7 @@ from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.alias_store import AliasStore
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.logpresso_environment import LogpressoEnvironmentStore, resolve_synced_table
 from app.services.dashboard_query_knowledge import DashboardQueryKnowledge
 
 
@@ -56,6 +57,10 @@ class QueryGenerator:
         mapped_table = StoreTableMapping(settings.store_table_mapping_path).resolve(
             store_match.product if store_match else payload.context.store_product,
             store_match.schema_name if store_match else payload.context.store_schema,
+        )
+        mapped_table = mapped_table or resolve_synced_table(
+            LogpressoEnvironmentStore(settings.logpresso_snapshot_path).load(),
+            store_match.product if store_match else payload.context.store_product,
         )
         if mapped_table:
             context = payload.context.model_copy(deep=True)
