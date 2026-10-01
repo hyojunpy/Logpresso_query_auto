@@ -20,6 +20,7 @@ from app.services.quality_analyzer import QueryQualityAnalyzer
 from app.services.alias_store import AliasStore
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.dashboard_query_knowledge import DashboardQueryKnowledge
 
 
 class QueryGenerator:
@@ -45,6 +46,9 @@ class QueryGenerator:
         )
 
     def generate(self, payload: GenerateQueryRequest) -> GenerateQueryResponse:
+        dashboard_example = DashboardQueryKnowledge.bundled().match(payload.request)
+        if dashboard_example:
+            return self._dashboard_response(payload, dashboard_example)
         store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
         store_match = store_knowledge.match(
             payload.request, payload.context.store_product, payload.context.store_schema
@@ -116,6 +120,16 @@ class QueryGenerator:
         llm_notice = self._llm_fallback_notice(llm_data)
         query = llm_query or self._template_query(intent)
         validation = self._validate(query, payload)
+        used_template_fallback = False
+        fallback_reason = llm_data.get("error_type")
+        if validation.valid and llm_query and not self._covers_intent(query, intent):
+            template_query = self._safe_template_query(intent)
+            template_validation = self._validate(template_query, payload)
+            if template_validation.valid:
+                query = template_query
+                validation = template_validation
+                used_template_fallback = True
+                fallback_reason = "llm_candidate_missing_required_pipeline"
         repair_attempts = 0
         while not validation.valid and repair_attempts < 2:
             repair_attempts += 1
@@ -131,7 +145,6 @@ class QueryGenerator:
             repaired_validation = self._validate(repaired, payload)
             query = repaired
             validation = repaired_validation
-        used_template_fallback = False
         if not validation.valid and llm_query:
             template_query = self._safe_template_query(intent)
             template_validation = self._validate(template_query, payload)
@@ -139,6 +152,7 @@ class QueryGenerator:
                 query = template_query
                 validation = template_validation
                 used_template_fallback = True
+                fallback_reason = "llm_candidate_failed_validation"
         references = references_for_query_parts(
             self.retriever,
             query,
@@ -168,9 +182,32 @@ class QueryGenerator:
                 "llm_used": bool(llm_query) and not used_template_fallback,
                 "template_fallback": used_template_fallback,
                 "llm_candidate_valid": bool(llm_query) and not used_template_fallback and validation.valid,
-                "fallback_reason": "llm_candidate_failed_validation" if used_template_fallback else llm_data.get("error_type"),
+                "fallback_reason": fallback_reason,
                 "repair_attempts": repair_attempts,
             },
+        )
+
+    def _dashboard_response(self, payload: GenerateQueryRequest, example: dict) -> GenerateQueryResponse:
+        query = str(example["query"])
+        intent = QueryIntent(objective=payload.request, query_type="adhoc")
+        validation = self._validate(query, payload)
+        references = references_for_query_parts(
+            self.retriever, query, "검증된 운영 대시보드 예제의 명령어 근거입니다."
+        )
+        quality = self.quality_analyzer.analyze(query, validation)
+        preview = self.execution_preview.build(query if validation.valid else None, validation, quality)
+        return GenerateQueryResponse(
+            status="generated" if validation.valid else "unsupported",
+            query=query if validation.valid else None,
+            intent=intent,
+            validation=validation,
+            schema_validation=self.catalog.validate_query(query, payload.context),
+            quality=quality,
+            execution_preview=preview,
+            explanation=self._explain(query, intent),
+            references=references,
+            assumptions=[f"검증된 운영 대시보드 템플릿을 적용했습니다: {example['title']}"],
+            debug={"provider": "curated_dashboard_template", "dashboard_template": example["title"]},
         )
 
     @staticmethod
@@ -307,6 +344,33 @@ class QueryGenerator:
             return self._template_query(intent)
         except ValueError:
             return ""
+
+    @staticmethod
+    def _covers_intent(query: str, intent: QueryIntent) -> bool:
+        """Reject syntactically valid LLM fragments that omit required pipeline stages."""
+        lowered = query.lower()
+        if intent.source_type == "table":
+            if not re.search(r"(?m)^\s*(?:\|\s*)?table\b", lowered):
+                return False
+            if intent.tables and intent.tables[0].lower() not in lowered:
+                return False
+        elif intent.source_type in {"logger", "stream"}:
+            sources = intent.loggers if intent.source_type == "logger" else intent.streams
+            if not re.search(rf"(?m)^\s*(?:\|\s*)?{intent.source_type}\b", lowered):
+                return False
+            if sources and sources[0].lower() not in lowered:
+                return False
+        elif intent.source_type == "fulltext" and not re.search(r"(?m)^\s*(?:\|\s*)?fulltext\b", lowered):
+            return False
+        if intent.time_range and intent.time_range.duration:
+            duration = re.escape(intent.time_range.duration.lower())
+            if not re.search(rf"(?:duration|window)\s*=\s*{duration}\b|ago\([\"']{duration}[\"']\)", lowered):
+                return False
+        if intent.aggregations and not re.search(r"(?m)^\s*(?:\|\s*)?(?:stats|timechart|rollup)\b", lowered):
+            return False
+        if intent.group_by and any(field.lower() not in lowered for field in intent.group_by):
+            return False
+        return True
 
     def _template_query(self, intent: QueryIntent) -> str:
         if intent.join:

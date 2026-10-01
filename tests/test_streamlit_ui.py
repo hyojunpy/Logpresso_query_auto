@@ -9,27 +9,57 @@ pytestmark = pytest.mark.advanced_parser
 
 @unittest.skipIf(importlib.util.find_spec("streamlit.testing.v1") is None, "streamlit testing is not installed")
 class StreamlitUiTest(unittest.TestCase):
-    def test_realtime_quick_test_applies_sample_schema_hints(self):
+    def test_dashboard_mode_builds_preview_and_exports(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(Path("ui") / "streamlit_app.py"), default_timeout=30)
+        app.run()
+        next(item for item in app.radio if item.label == "작업 유형").set_value("대시보드 생성").run()
+        assert any(item.label == "대시보드 예시" for item in app.selectbox)
+        assert any(item.label == "선택한 예시로 바로 설계" for item in app.button)
+        assert any(item.label == "예시 제조사" for item in app.selectbox)
+        assert any(item.label == "예시 제품" for item in app.selectbox)
+        assert any(item.label == "예시 로그 형식" for item in app.selectbox)
+        assert any(item.label == "선택한 Syslog 예시로 바로 설계" for item in app.button)
+        next(item for item in app.text_area if item.label == "대시보드 요청").set_value(
+            "라이선스와 로그 수집 상태 운영 대시보드 만들어줘"
+        )
+        next(button for button in app.button if button.label == "대시보드 설계").click().run()
+
+        assert any("패널 쿼리 8/8개 검증 통과" in item.value for item in app.success)
+        downloads = [item.label for item in app.get("download_button")]
+        assert "대시보드 JSON 다운로드" in downloads
+        assert "대시보드 YAML 다운로드" in downloads
+        buttons = [item.label for item in app.button]
+        assert "설계 저장" in buttons
+        assert "Logpresso 배포계획 미리보기" in buttons
+        assert any("성능·비용 점검" in item.label for item in app.expander)
+
+    def test_main_screen_uses_product_and_schema_selection_instead_of_examples(self):
         from streamlit.testing.v1 import AppTest
 
         app = AppTest.from_file(str(Path("ui") / "streamlit_app.py"), default_timeout=15)
         app.run()
 
-        category = next(item for item in app.selectbox if item.label == "빠른 테스트 분류")
-        category.select("실시간 Logger·Stream").run()
-        quick_test = next(item for item in app.selectbox if item.label == "빠른 테스트")
-        quick_test.select(
-            "security_stream 스트림에서 최근 1분 동안 severity가 7 이상인 이벤트를 "
-            "asset_info 테이블과 src_ip와 ip_address 기준으로 left streamjoin하고 "
-            "event_type별 건수를 많은 순으로 20개 보여줘"
-        ).run()
-        next(button for button in app.button if button.label == "쿼리 생성").click().run()
+        labels = [item.label for item in app.selectbox]
+        self.assertIn("제조사", labels)
+        self.assertIn("Syslog 제품", labels)
+        self.assertIn("로그 형식", labels)
+        self.assertNotIn("예제 요청", labels)
+        self.assertNotIn("빠른 테스트", labels)
+        self.assertTrue(any(area.label == "쿼리 요청" for area in app.text_area))
 
-        self.assertFalse(any("추가 정보가 필요합니다." in item.value for item in app.warning))
-        query = next(block.value for block in app.code if "streamjoin" in block.value)
-        self.assertIn("stream window=1m security_stream", query)
-        self.assertIn("eval _join_key = src_ip", query)
-        self.assertIn("eval _join_key = ip_address", query)
+        next(item for item in app.selectbox if item.label == "제조사").select("MONITORAPP").run()
+        next(item for item in app.selectbox if item.label == "Syslog 제품").select("AIWAF").run()
+        next(item for item in app.selectbox if item.label == "로그 형식").select("AIWAF Alert").run()
+
+        self.assertTrue(any(item.label == "선택된 로그 형식 필드 28개" for item in app.expander))
+        table_input = next(item for item in app.text_input if item.label == "조회 테이블")
+        self.assertEqual(table_input.value, "secui_events")
+        field_table = next(item for item in app.dataframe if "필드명" in item.value.columns)
+        self.assertIn("_time", field_table.value["필드명"].tolist())
+        self.assertIn("표시명", field_table.value.columns)
+        self.assertIn("유사어", field_table.value.columns)
 
     def test_clarification_area_clears_after_successful_generation(self):
         from streamlit.testing.v1 import AppTest

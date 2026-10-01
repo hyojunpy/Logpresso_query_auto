@@ -9,6 +9,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from scripts.store_field_metadata import enrich_payload
+
 
 TYPE_MAP = {
     "DATE": "datetime", "LONG": "integer", "INT": "integer", "INTEGER": "integer",
@@ -266,10 +268,10 @@ def build(source: Path) -> dict[str, object]:
         "raw_formats": sum(len(items) for items in raw_formats.values()),
     }
     workbook.close()
-    return {
+    return enrich_payload({
         "version": version, "source": source.name, "stats": stats,
         "common_fields": common_fields, "products": products,
-    }
+    })
 
 
 def main() -> None:

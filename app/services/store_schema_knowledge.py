@@ -151,6 +151,68 @@ class StoreSchemaKnowledge:
         })
         return stats
 
+    def coverage(self, *, missing_only: bool = False, limit: int = 500) -> list[dict[str, Any]]:
+        rows = []
+        for product in self.payload.get("products", []):
+            for schema in product.get("schemas", []):
+                field_count = len(schema.get("fields", []))
+                if missing_only and field_count:
+                    continue
+                rows.append({
+                    "manufacturer": product.get("manufacturer"),
+                    "product": product.get("name"),
+                    "schema": schema.get("name"),
+                    "field_count": field_count,
+                    "log_type_count": len(schema.get("log_types", [])),
+                    "has_raw_format": bool(product.get("raw_formats")),
+                    "status": schema.get("status"),
+                })
+        rows.sort(key=lambda item: (item["field_count"] > 0, not item["has_raw_format"], str(item["product"]), str(item["schema"])))
+        return rows[:max(1, min(limit, 2_000))]
+
+    def detect_raw(self, raw_line: str, product_hint: str | None = None, limit: int = 5) -> list[dict[str, Any]]:
+        candidates = []
+        for product in self.payload.get("products", []):
+            if product_hint and product.get("name") != product_hint:
+                continue
+            for format_ in product.get("raw_formats", []):
+                result = self.validate_raw(str(product.get("name")), str(format_.get("log_type")), raw_line)
+                expected = int(result.get("expected_fields") or 0)
+                actual = int(result.get("actual_fields") or 0)
+                closeness = 1.0 if result.get("valid") else max(0.0, 1 - abs(expected - actual) / max(expected, 1))
+                marker = str(format_.get("log_type") or "").split("/", 1)[0].strip().lower()
+                marker_match = bool(marker and marker in raw_line[:80].lower())
+                score = min(1.0, closeness * 0.75 + (0.25 if marker_match else 0))
+                candidates.append({
+                    "product": product.get("name"), "log_type": format_.get("log_type"),
+                    "score": round(score, 3), "valid": bool(result.get("valid")),
+                    "expected_fields": expected, "actual_fields": actual,
+                    "delimiter": result.get("delimiter"), "reason": result.get("reason"),
+                })
+        return sorted(candidates, key=lambda item: (-item["score"], str(item["product"])))[:max(1, min(limit, 20))]
+
+    def preflight(self, product_name: str, schema_name: str | None, mapped_table: str | None) -> dict[str, Any]:
+        product = next((item for item in self.payload.get("products", []) if item.get("name") == product_name), None)
+        schema = next((item for item in (product or {}).get("schemas", []) if item.get("name") == schema_name), None)
+        issues = []
+        if not product:
+            issues.append("unknown_product")
+        if schema_name and not schema:
+            issues.append("unknown_schema")
+        if schema and not schema.get("fields"):
+            issues.append("fields_unavailable")
+        if not mapped_table:
+            issues.append("table_mapping_missing")
+        return {
+            "ready": not issues,
+            "issues": issues,
+            "product": product_name,
+            "schema": schema_name,
+            "table": mapped_table,
+            "field_count": len((schema or {}).get("fields", [])),
+            "raw_format_count": len((product or {}).get("raw_formats", [])),
+        }
+
     def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         needle = self._normalize(query)
         results = []
@@ -267,12 +329,19 @@ class StoreSchemaKnowledge:
         return list(fields_by_name.values())
 
     def _field_replacements(self, text: str, fields: list[dict[str, Any]]) -> list[tuple[str, str]]:
-        aliases: dict[str, set[str]] = {}
+        aliases: dict[str, dict[str, set[str]]] = {}
         for field in fields:
             for alias in field.get("aliases", []):
                 if self._field_alias_match(text, alias):
-                    aliases.setdefault(alias, set()).add(field["name"])
-        replacements = [(alias, next(iter(names))) for alias, names in aliases.items() if len(names) == 1]
+                    normalized = str(alias).casefold()
+                    entry = aliases.setdefault(normalized, {"phrases": set(), "names": set()})
+                    entry["phrases"].add(str(alias))
+                    entry["names"].add(field["name"])
+        replacements = [
+            (max(entry["phrases"], key=len), next(iter(entry["names"])))
+            for entry in aliases.values()
+            if len(entry["names"]) == 1
+        ]
         replacements.sort(key=lambda item: len(item[0]), reverse=True)
         accepted: list[tuple[str, str]] = []
         occupied: list[tuple[int, int]] = []

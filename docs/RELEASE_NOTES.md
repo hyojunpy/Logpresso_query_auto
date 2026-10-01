@@ -1,5 +1,23 @@
 # Release Notes
 
+## 0.1.13 - 2026-09-15
+
+- Added persisted dashboard drafts with list/load/update/clone/delete operations.
+- Added immutable revisions, JSON diffs, and revision restore.
+- Added firewall, WAF, IPS, VPN, NAC, and EDR dashboard categories.
+- Added shared dashboard variables, query-weight analysis, and performance recommendations.
+- Added a TLS-safe Logpresso deployment-plan boundary that does not mutate the target server.
+- Added saved-dashboard, performance, and deployment-plan controls to the Streamlit dashboard designer.
+- Added catalog-driven dashboard examples for all 470 known Store Syslog schemas, with field-aware panels and safe baseline coverage.
+
+## 0.1.11 - 2026-09-15
+
+- Added CSV bulk import/export for real Store table mappings and schema readiness diagnostics.
+- Added coverage prioritization for 316 schemas without published fields.
+- Added privacy-safe, non-persistent Raw Syslog product/format candidate detection.
+- Added an explicit opt-in HTTPS dry-run verification adapter; external verification remains disabled by default.
+- Grouped Store controls as operations management and made HTTPS/backup scripts honor an explicitly selected data directory.
+
 ## 0.1.4 - 2026-08-18
 
 - Added 63 categorized quick-test requests with automatic sample table, stream, logger, and field hints.

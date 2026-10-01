@@ -8,6 +8,7 @@ import streamlit as st
 from app.core.config import settings
 from app.core.ui_auth import LoginAttemptStore, authenticate, hash_password, load_users, session_expired, verify_password
 from app.models.request import Catalog, CatalogField, CatalogTable, FeedbackRequest, GenerateQueryRequest, RequestContext
+from app.models.dashboard import DashboardDefinition, DashboardDesignRequest, DashboardThreshold, LogpressoTarget
 from app.services.catalog_service import CatalogService
 from app.services.catalog_import import CatalogImportError, catalog_from_csv_bytes
 from app.services.feedback_store import FeedbackStore
@@ -31,14 +32,9 @@ from app.services.metrics_store import MetricsStore, metric_label, operational_o
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
 from app.services.store_table_mapping import StoreTableMapping
-try:
-    # Package import when tests or Python load the app from the repository root.
-    from ui.quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
-except ModuleNotFoundError as error:
-    # Streamlit executes this file directly, placing /app/ui (not /app) on sys.path.
-    if error.name != "ui":
-        raise
-    from quick_test_catalog import QUICK_TEST_REQUESTS, build_quick_test_preset, quick_test_count
+from app.services.dashboard_designer import DashboardDesigner, dashboard_to_yaml
+from app.services.dashboard_operations import analyze_dashboard, deployment_plan
+from app.services.dashboard_store import DashboardStore
 
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
@@ -302,7 +298,7 @@ with st.sidebar:
         st.success("생성 준비 상태: 준비됨")
     else:
         st.warning("생성 준비 상태: 기준 문서 또는 인덱스를 확인하세요.")
-    product = st.selectbox("제품군", ["ENT", "STD", "SNR", "FRS"], index=0)
+    product = st.selectbox("로그프레소 라이선스 제품군", ["ENT", "STD", "SNR", "FRS"], index=0)
     generation_mode = st.selectbox(
         "생성 모드",
         ["자동", "빠른 규칙 기반", "Ollama 보조"],
@@ -317,7 +313,7 @@ with st.sidebar:
     selected_store_product = ""
     selected_store_schema = ""
     mapped_store_table = None
-    with st.expander("Logpresso Store 스키마", expanded=False):
+    with st.expander("운영 관리 · Logpresso Store 스키마", expanded=False):
         store_status = store_knowledge.status()
         col1, col2, col3 = st.columns(3)
         col1.metric("제품", store_status.get("products", 0))
@@ -363,6 +359,41 @@ with st.sidebar:
         mappings = store_mapping.list()
         if mappings:
             st.dataframe(mappings, use_container_width=True, hide_index=True)
+        st.download_button(
+            "테이블 매핑 CSV 다운로드",
+            store_mapping.export_csv(),
+            file_name="store-table-mappings.csv",
+            mime="text/csv",
+        )
+        mapping_file = st.file_uploader("테이블 매핑 CSV 일괄 등록", type=["csv"], key="store_mapping_csv")
+        if mapping_file is not None and st.button(
+            "매핑 CSV 적용", disabled=not has_role("editor", "admin")
+        ):
+            try:
+                imported_mappings = store_mapping.import_csv(mapping_file.getvalue())
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success(f"테이블 매핑 {len(imported_mappings)}개를 반영했습니다.")
+                st.rerun()
+
+        if selected_store_product:
+            readiness = store_knowledge.preflight(
+                selected_store_product, selected_store_schema or None, mapped_store_table
+            )
+            if readiness["ready"]:
+                st.success("선택한 스키마는 쿼리 생성 준비가 완료되었습니다.")
+            else:
+                issue_labels = {
+                    "fields_unavailable": "상세 필드 미공개",
+                    "table_mapping_missing": "실제 테이블 매핑 필요",
+                    "unknown_schema": "알 수 없는 스키마",
+                }
+                st.warning(" · ".join(issue_labels.get(item, item) for item in readiness["issues"]))
+
+        missing_coverage = store_knowledge.coverage(missing_only=True)
+        with st.expander(f"필드 미공개 우선 보강 목록 {len(missing_coverage)}개"):
+            st.dataframe(missing_coverage, use_container_width=True, hide_index=True)
 
         store_file = st.file_uploader("Store 카탈로그 Excel 업데이트", type=["xlsx"], key="store_schema_xlsx")
         if store_file is not None:
@@ -386,9 +417,19 @@ with st.sidebar:
                     st.rerun()
 
         raw_formats = (selected_product_data or {}).get("raw_formats", [])
+        raw_line = st.text_area(
+            "Raw Syslog 샘플",
+            key="store_raw_sample",
+            help="화면에서만 분석하며 자동 저장하지 않습니다. 제품을 선택하지 않아도 형식 후보를 찾습니다.",
+        )
+        if st.button("Raw 제품·형식 자동 판별", disabled=not raw_line):
+            detected = store_knowledge.detect_raw(raw_line, selected_store_product or None)
+            if detected:
+                st.dataframe(detected, use_container_width=True, hide_index=True)
+            else:
+                st.warning("비교할 수 있는 공개 Raw 양식이 없습니다.")
         if raw_formats:
             raw_type = st.selectbox("Raw 로그 유형", [str(item.get("log_type")) for item in raw_formats])
-            raw_line = st.text_area("Raw Syslog 샘플", key="store_raw_sample")
             if st.button("Raw 형식 검증") and raw_line:
                 raw_result = store_knowledge.validate_raw(selected_store_product, raw_type, raw_line)
                 if raw_result.get("valid"):
@@ -645,40 +686,319 @@ with st.sidebar:
 
 st.title("로그프레소 자연어 쿼리 생성기")
 
-examples = [
-    "최근 24시간 동안 firewall_logs에서 출발지 IP별 차단 건수를 집계해서 많은 순으로 20개 보여줘",
-    "araqne_query_logs에서 root가 실행한 쿼리를 찾아줘",
-    "araqne_query_logs에서 root 사용자의 실행 건수를 10분 단위로 보여줘",
-    "firewall_logs의 src_ip를 할당ip로 rename해줘",
-    "firewall_logs에서 src_ip, action만 보여줘",
-    "에러 로그 보여줘",
-]
-selected = st.selectbox("예제 요청", [""] + examples)
-quick_search = st.text_input("빠른 테스트 검색", placeholder="예: join, fulltext, 로그인 실패")
-quick_category = st.selectbox("빠른 테스트 분류", ["전체"] + list(QUICK_TEST_REQUESTS))
-quick_options = (
-    [request for requests in QUICK_TEST_REQUESTS.values() for request in requests]
-    if quick_category == "전체"
-    else QUICK_TEST_REQUESTS.get(quick_category, [])
-)
-if quick_search.strip():
-    quick_options = [request for request in quick_options if quick_search.strip().lower() in request.lower()]
-quick_choice = st.selectbox(
-    "빠른 테스트",
-    [""] + quick_options,
-    format_func=lambda value: f"✅ {value}" if value else "선택하세요",
-)
-quick_preset = build_quick_test_preset(quick_choice) if quick_choice else {}
-if quick_preset:
-    st.success("즉시 생성 가능 · 샘플 스키마 자동 적용")
-    st.caption("테이블별 필드와 실시간 소스 힌트를 분리해 적용합니다.")
-else:
-    st.caption(
-        f"{quick_test_count()}개 복합 예시를 분류별로 제공합니다. "
-        "현재 제공되는 모든 빠른 테스트는 자동 생성 검증을 통과했습니다."
+work_mode = st.radio("작업 유형", ["쿼리 생성", "대시보드 생성"], horizontal=True)
+if work_mode == "대시보드 생성":
+    st.subheader("자연어 대시보드 설계")
+    st.caption("공통 운영 대시보드 또는 제조사·제품·로그 형식별 보안 대시보드를 설계합니다.")
+    dashboard_designer = DashboardDesigner()
+    dashboard_examples = dashboard_designer.example_requests()
+    example_by_label = {
+        f"{item['title']} · 패널 {item['panel_count']}개": item
+        for item in dashboard_examples
+    }
+    with st.expander(f"제공받은 운영 대시보드 예시 · {len(dashboard_examples) - 1}종", expanded=True):
+        example_label = st.selectbox(
+            "대시보드 예시",
+            list(example_by_label),
+            help="통합 운영 현황은 아래 8개 예시를 하나의 대시보드로 구성합니다.",
+        )
+        selected_example = example_by_label[example_label]
+        st.caption(selected_example["description"])
+        if st.button("선택한 예시로 바로 설계", type="primary", width="stretch"):
+            st.session_state["dashboard_definition"] = dashboard_designer.design(DashboardDesignRequest(
+                request=selected_example["request"], context=RequestContext(product=product),
+            )).model_dump()
+            st.session_state.pop("dashboard_record_id", None)
+            st.rerun()
+    syslog_examples = dashboard_designer.product_example_catalog()
+    with st.expander(f"고객사 Syslog 대시보드 예시 · {len(syslog_examples)}종", expanded=True):
+        example_manufacturers = list(dict.fromkeys(
+            str(item["manufacturer"]) for item in syslog_examples if item.get("manufacturer")
+        ))
+        syslog_col1, syslog_col2, syslog_col3 = st.columns(3)
+        with syslog_col1:
+            example_manufacturer = st.selectbox("예시 제조사", example_manufacturers)
+        example_products = list(dict.fromkeys(
+            str(item["product"]) for item in syslog_examples
+            if item.get("manufacturer") == example_manufacturer
+        ))
+        with syslog_col2:
+            example_product = st.selectbox("예시 제품", example_products)
+        product_examples = [
+            item for item in syslog_examples
+            if item.get("manufacturer") == example_manufacturer and item.get("product") == example_product
+        ]
+        with syslog_col3:
+            example_schema = st.selectbox("예시 로그 형식", [str(item["schema"]) for item in product_examples])
+        syslog_example = next(item for item in product_examples if item["schema"] == example_schema)
+        coverage_label = "상세 필드 맞춤" if syslog_example["coverage"] == "field-aware" else "기본 안전 구성"
+        st.caption(
+            f"{coverage_label} · 필드 {syslog_example['field_count']}개 · "
+            f"추천 패널 {len(syslog_example['recommended_panels'])}개"
+        )
+        st.write(" · ".join(syslog_example["recommended_panels"]))
+        if st.button("선택한 Syslog 예시로 바로 설계", type="primary", width="stretch"):
+            table_name = store_mapping.resolve(example_product, example_schema) or "secui_events"
+            st.session_state["dashboard_definition"] = dashboard_designer.design(DashboardDesignRequest(
+                request=syslog_example["request"], manufacturer=example_manufacturer,
+                store_product=example_product, store_schema=example_schema, table_name=table_name,
+                context=RequestContext(product=product),
+            )).model_dump()
+            st.session_state.pop("dashboard_record_id", None)
+            st.rerun()
+    dashboard_store = DashboardStore(settings.dashboard_db_path)
+    saved_dashboards = dashboard_store.list()
+    with st.expander(f"저장된 대시보드 · {len(saved_dashboards)}개"):
+        if saved_dashboards:
+            saved_by_label = {
+                f"{item.title} · r{item.revision} · 패널 {item.panel_count}개": item
+                for item in saved_dashboards
+            }
+            saved_label = st.selectbox("저장된 설계", list(saved_by_label), key="saved_dashboard_choice")
+            saved_item = saved_by_label[saved_label]
+            saved_col1, saved_col2 = st.columns(2)
+            if saved_col1.button("불러오기", width="stretch"):
+                st.session_state["dashboard_definition"] = dashboard_store.get(saved_item.id).dashboard.model_dump()
+                st.session_state["dashboard_record_id"] = saved_item.id
+                st.rerun()
+            if saved_col2.button("복제하여 불러오기", width="stretch"):
+                clone = dashboard_store.clone(saved_item.id)
+                st.session_state["dashboard_definition"] = clone.dashboard.model_dump()
+                st.session_state["dashboard_record_id"] = clone.id
+                st.rerun()
+            revisions = dashboard_store.revisions(saved_item.id)
+            st.dataframe(revisions, width="stretch", hide_index=True)
+        else:
+            st.caption("아직 저장된 대시보드가 없습니다.")
+    dashboard_request = st.text_area(
+        "대시보드 요청",
+        placeholder="예: 라이선스와 로그 수집 상태를 한 화면에서 확인하는 운영 대시보드 만들어줘",
+        height=100,
     )
-default_request = quick_preset.get("request") or selected or st.session_state.get("request_text", "")
-request_text = st.text_area("사용자 요청", value=default_request, height=130)
+    dashboard_products = store_knowledge.payload.get("products", [])
+    dashboard_manufacturers = list(dict.fromkeys(
+        str(item.get("manufacturer")) for item in dashboard_products if item.get("manufacturer")
+    ))
+    scope_col1, scope_col2, scope_col3 = st.columns(3)
+    with scope_col1:
+        dashboard_manufacturer = st.selectbox("대시보드 제조사", [""] + dashboard_manufacturers)
+    scoped_products = [
+        str(item.get("name")) for item in dashboard_products
+        if not dashboard_manufacturer or item.get("manufacturer") == dashboard_manufacturer
+    ]
+    with scope_col2:
+        dashboard_product = st.selectbox("대시보드 제품", [""] + scoped_products)
+    dashboard_product_data = next(
+        (item for item in dashboard_products if item.get("name") == dashboard_product), None
+    )
+    dashboard_schemas = [str(item.get("name")) for item in (dashboard_product_data or {}).get("schemas", [])]
+    with scope_col3:
+        dashboard_schema = st.selectbox("대시보드 로그 형식", [""] + dashboard_schemas, disabled=not dashboard_product)
+    setting_col1, setting_col2, setting_col3 = st.columns(3)
+    with setting_col1:
+        dashboard_table = st.text_input(
+            "대시보드 조회 테이블",
+            value="secui_events" if dashboard_product else "",
+            disabled=not dashboard_product,
+        )
+    with setting_col2:
+        dashboard_time_range = st.selectbox("기본 시간 범위", ["1h", "6h", "24h", "7d", "30d"], index=2)
+    with setting_col3:
+        dashboard_refresh = st.number_input("새로고침 주기 초", min_value=30, max_value=86400, value=300, step=30)
+    if st.button("대시보드 설계", type="primary", disabled=not dashboard_request.strip()):
+        st.session_state["dashboard_definition"] = dashboard_designer.design(DashboardDesignRequest(
+            request=dashboard_request,
+            manufacturer=dashboard_manufacturer or None,
+            store_product=dashboard_product or None,
+            store_schema=dashboard_schema or None,
+            table_name=dashboard_table or None,
+            default_time_range=dashboard_time_range,
+            refresh_interval_seconds=int(dashboard_refresh),
+            context=RequestContext(product=product),
+        )).model_dump()
+
+    if dashboard_payload := st.session_state.get("dashboard_definition"):
+        dashboard = DashboardDefinition.model_validate(dashboard_payload)
+        st.divider()
+        dashboard.title = st.text_input("대시보드 제목", value=dashboard.title)
+        dashboard.description = st.text_area("대시보드 설명", value=dashboard.description, height=70)
+        st.subheader(f"패널 미리보기 · {len(dashboard.panels)}개")
+        edited_panels = []
+        for index, panel in enumerate(dashboard.panels):
+            with st.expander(f"{index + 1}. {panel.title}", expanded=index < 2):
+                title_col, visual_col, unit_col = st.columns([2, 1, 1])
+                with title_col:
+                    panel.title = st.text_input("패널 제목", value=panel.title, key=f"dashboard_panel_title_{panel.id}")
+                with visual_col:
+                    visual_options = ["metric", "status", "line", "bar", "table"]
+                    panel.visualization = st.selectbox(
+                        "시각화", visual_options, index=visual_options.index(panel.visualization), key=f"dashboard_visual_{panel.id}"
+                    )
+                with unit_col:
+                    panel.unit = st.text_input("단위", value=panel.unit or "", key=f"dashboard_unit_{panel.id}") or None
+                panel.query = st.text_area("패널 쿼리", value=panel.query, height=180, key=f"dashboard_query_{panel.id}")
+                layout_cols = st.columns(4)
+                panel.layout.x = int(layout_cols[0].number_input("X", 0, 11, panel.layout.x, key=f"dashboard_x_{panel.id}"))
+                panel.layout.y = int(layout_cols[1].number_input("Y", 0, 100, panel.layout.y, key=f"dashboard_y_{panel.id}"))
+                panel.layout.width = int(layout_cols[2].number_input("너비", 1, 12, panel.layout.width, key=f"dashboard_w_{panel.id}"))
+                panel.layout.height = int(layout_cols[3].number_input("높이", 1, 12, panel.layout.height, key=f"dashboard_h_{panel.id}"))
+                if panel.thresholds:
+                    threshold_text = st.text_area(
+                        "임계치 JSON",
+                        value=json.dumps([item.model_dump() for item in panel.thresholds], ensure_ascii=False, indent=2),
+                        height=130,
+                        key=f"dashboard_thresholds_{panel.id}",
+                        help="operator, value, severity, label을 수정할 수 있습니다.",
+                    )
+                    try:
+                        panel.thresholds = [DashboardThreshold.model_validate(item) for item in json.loads(threshold_text)]
+                    except (ValueError, TypeError):
+                        st.warning("임계치 JSON 형식을 확인하세요. 마지막 정상 값을 사용합니다.")
+                edited_panels.append(panel)
+        dashboard.panels = edited_panels
+        dashboard, dashboard_validation = DashboardDesigner().validate(dashboard, RequestContext(product=product))
+        if dashboard_validation.valid:
+            st.success(f"패널 쿼리 {dashboard_validation.valid_panels}/{dashboard_validation.panel_count}개 검증 통과")
+        else:
+            st.error(f"검증 실패 패널 {dashboard_validation.invalid_panels}개")
+        st.dataframe(dashboard_validation.panels, width="stretch", hide_index=True)
+        analysis = analyze_dashboard(dashboard)
+        with st.expander(f"성능·비용 점검 · {analysis.score}점", expanded=bool(analysis.warnings)):
+            st.metric("예상 쿼리 부하", analysis.estimated_query_weight)
+            for warning in analysis.warnings:
+                st.warning(warning)
+            for recommendation in analysis.recommendations:
+                st.info(recommendation)
+            st.dataframe(analysis.panel_details, width="stretch", hide_index=True)
+        preview_columns = st.columns(2)
+        for index, panel in enumerate(dashboard.panels):
+            with preview_columns[index % 2].container(border=True):
+                st.markdown(f"**{panel.title}**")
+                st.caption(f"{panel.visualization} · {panel.unit or '단위 없음'} · {panel.layout.width}×{panel.layout.height}")
+                st.code(panel.query, language="text")
+        export_payload = dashboard.model_copy(deep=True)
+        for panel in export_payload.panels:
+            panel.validation = None
+        export_col1, export_col2 = st.columns(2)
+        export_col1.download_button(
+            "대시보드 JSON 다운로드",
+            export_payload.model_dump_json(indent=2),
+            file_name="logpresso-dashboard.json",
+            mime="application/json",
+            width="stretch",
+        )
+        export_col2.download_button(
+            "대시보드 YAML 다운로드",
+            dashboard_to_yaml(export_payload),
+            file_name="logpresso-dashboard.yaml",
+            mime="application/yaml",
+            width="stretch",
+        )
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button("설계 저장", width="stretch"):
+            record = dashboard_store.save(
+                export_payload,
+                st.session_state.get("dashboard_record_id"),
+                "웹 편집기에서 저장",
+            )
+            st.session_state["dashboard_record_id"] = record.id
+            st.success(f"저장 완료 · 리비전 {record.revision}")
+        if action_col2.button("Logpresso 배포계획 미리보기", width="stretch"):
+            st.session_state["dashboard_deployment_plan"] = deployment_plan(
+                export_payload,
+                LogpressoTarget(base_url="https://10.11.12.14", verify_tls=True),
+            ).model_dump()
+        if plan := st.session_state.get("dashboard_deployment_plan"):
+            with st.expander("배포계획 · 실제 서버 변경 없음", expanded=True):
+                st.write(f"대상: {plan['target']['base_url']}")
+                st.write(f"위젯 {plan['widget_count']}개 · 변수 {plan['variable_count']}개")
+                for step in plan["steps"]:
+                    st.write(f"- {step}")
+                for warning in plan["warnings"]:
+                    st.warning(warning)
+                st.json(plan["payload"], expanded=False)
+        st.session_state["dashboard_definition"] = dashboard.model_dump()
+    st.stop()
+
+store_products = store_knowledge.payload.get("products", [])
+manufacturers = list(dict.fromkeys(
+    str(item.get("manufacturer")) for item in store_products if item.get("manufacturer")
+))
+selection_col1, selection_col2 = st.columns(2)
+with selection_col1:
+    selected_manufacturer = st.selectbox("제조사", [""] + manufacturers)
+product_options = [
+    str(item.get("name")) for item in store_products
+    if not selected_manufacturer or item.get("manufacturer") == selected_manufacturer
+]
+with selection_col2:
+    selected_store_product = st.selectbox("Syslog 제품", [""] + product_options)
+selected_product_data = next(
+    (item for item in store_products if item.get("name") == selected_store_product), None
+)
+schema_options = [str(item.get("name")) for item in (selected_product_data or {}).get("schemas", [])]
+selected_store_schema = st.selectbox(
+    "로그 형식",
+    [""] + schema_options,
+    disabled=not selected_store_product,
+    help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
+)
+saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+query_store_table = st.text_input(
+    "조회 테이블",
+    value=saved_store_table or ("secui_events" if selected_store_product else ""),
+    disabled=not selected_store_product,
+    help="테스트 기본값은 secui_events입니다. 실제 환경의 테이블명이 다르면 변경하세요.",
+    key=f"query_store_table::{selected_store_product}::{selected_store_schema}",
+)
+mapped_store_table = query_store_table.strip() or None
+selected_schema_data = next(
+    (item for item in (selected_product_data or {}).get("schemas", []) if item.get("name") == selected_store_schema),
+    None,
+)
+if selected_store_product:
+    field_count = len((selected_schema_data or {}).get("fields", []))
+    context_parts = [f"선택 제품: {selected_store_product}"]
+    if selected_store_schema:
+        context_parts.extend([f"로그 형식: {selected_store_schema}", f"공개 필드: {field_count}개"])
+    if mapped_store_table:
+        context_parts.append(f"대상 테이블: {mapped_store_table}")
+    st.caption(" · ".join(context_parts))
+    if mapped_store_table and not saved_store_table:
+        st.info("`secui_events`는 테스트용 기본 테이블입니다. 실제 로그 테이블이 다르면 위 값을 변경하세요.")
+    if selected_store_schema and field_count:
+        field_rows = [
+            {
+                "필드명": field.get("name", ""),
+                "표시명": field.get("display_name", ""),
+                "유형": field.get("type") or field.get("source_type", ""),
+                "설명": field.get("description", ""),
+                "유사어": ", ".join(str(alias) for alias in field.get("aliases", [])),
+            }
+            for field in selected_schema_data.get("fields", [])
+        ]
+        with st.expander(f"선택된 로그 형식 필드 {field_count}개", expanded=True):
+            st.dataframe(
+                field_rows,
+                width="stretch",
+                hide_index=True,
+                height=min(520, 38 + field_count * 35),
+            )
+            st.caption("필드명과 표시명·유사어를 자연어 요청에 사용할 수 있습니다.")
+    elif selected_store_schema:
+        st.warning("이 로그 형식은 공개 필드가 없어 제품·형식 힌트 중심으로 생성됩니다.")
+else:
+    st.caption("제품을 모르는 경우 선택하지 않고 요청문에 제품명·로그 종류·조건을 직접 적어도 됩니다.")
+
+request_placeholder = "예: 최근 24시간 출발지 IP별 차단 건수를 많은 순으로 20개 보여줘"
+if selected_store_schema:
+    request_placeholder = f"예: 최근 24시간 {selected_store_schema}에서 출발지 IP별 건수를 보여줘"
+request_text = st.text_area(
+    "쿼리 요청",
+    value=st.session_state.get("request_text", ""),
+    height=130,
+    placeholder=request_placeholder,
+)
 with st.expander("생성 전 해석 편집", expanded=False):
     st.caption("자연어 해석이 다를 때 이 값만 보완해 다시 생성할 수 있습니다.")
     interpretation_tables = st.text_input("테이블", placeholder="예: firewall_logs, insa")
@@ -698,23 +1018,6 @@ def request_fingerprint(text: str, context: RequestContext) -> str:
 def current_context() -> RequestContext:
     catalog_tables = active_catalog.tables if active_catalog else []
     request_tables = request_schema_catalog.tables if request_schema_catalog else []
-    quick_catalog = None
-    quick_source_fields = {
-        **quick_preset.get("table_fields", {}),
-        **quick_preset.get("stream_fields", {}),
-        **quick_preset.get("logger_fields", {}),
-    }
-    if quick_source_fields:
-        quick_catalog = Catalog(
-            source="fixture",
-            tables=[
-                CatalogTable(
-                    table_name=table_name,
-                    fields=[CatalogField(field_name=field_name) for field_name in fields],
-                )
-                for table_name, fields in quick_source_fields.items()
-            ],
-        )
     return RequestContext(
         product=product,
         version=version or None,
@@ -723,27 +1026,25 @@ def current_context() -> RequestContext:
         known_tables=list(dict.fromkeys(
             [line.strip() for line in known_tables.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_tables.split(",") if value.strip()]
-            + quick_preset.get("tables", [])
+            + ([mapped_store_table] if mapped_store_table else [])
             + st.session_state.get("learned_tables", [])
             + [table.table_name for table in catalog_tables + request_tables]
         )),
         known_fields=list(dict.fromkeys(
             [line.strip() for line in known_fields.splitlines() if line.strip()]
             + [value.strip() for value in interpretation_fields.split(",") if value.strip()]
-            + quick_preset.get("fields", [])
+            + [str(field.get("name")) for field in (selected_schema_data or {}).get("fields", []) if field.get("name")]
             + st.session_state.get("learned_fields", [])
             + [field.field_name for table in catalog_tables + request_tables for field in table.fields]
         )),
         known_loggers=list(dict.fromkeys(
             [line.strip() for line in known_loggers.splitlines() if line.strip()]
-            + quick_preset.get("loggers", [])
         )),
         known_streams=list(dict.fromkeys(
             [line.strip() for line in known_streams.splitlines() if line.strip()]
-            + quick_preset.get("streams", [])
         )),
         catalog=active_catalog,
-        request_catalog=request_schema_catalog or quick_catalog,
+        request_catalog=request_schema_catalog,
     )
 
 

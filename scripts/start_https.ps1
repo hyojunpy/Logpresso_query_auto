@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 $env:COMPOSE_PROJECT_NAME = "logpresso-dev"
-$env:LOGPRESSO_DATA_DIR = ".docker-dev"
+if (-not $env:LOGPRESSO_DATA_DIR) { $env:LOGPRESSO_DATA_DIR = ".docker-dev" }
 $binding = & (Join-Path $PSScriptRoot "sync_lan_bind.ps1")
 $docker = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
 if (-not (Test-Path $docker)) { $docker = (Get-Command docker).Source }

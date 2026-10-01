@@ -28,3 +28,23 @@ def test_mapping_delete_is_scoped_to_product_and_schema(tmp_path):
 
     assert store.resolve("A", "Detail") == "a_default"
     assert len(store.list()) == 1
+
+
+def test_mapping_csv_round_trip_and_upsert(tmp_path):
+    store = StoreTableMapping(tmp_path / "mappings.json")
+    store.save("AIWAF", "old_table")
+    items = store.import_csv(
+        b"product,schema,table\nAIWAF,,aiwaf_events\nFortiGate,FortiGate Traffic,fortigate_traffic\n"
+    )
+
+    assert store.resolve("AIWAF", None) == "aiwaf_events"
+    assert store.resolve("FortiGate", "FortiGate Traffic") == "fortigate_traffic"
+    assert store.export_csv().startswith("product,schema,table\n")
+    assert len(items) == 2
+
+
+def test_mapping_csv_rejects_invalid_table(tmp_path):
+    with pytest.raises(ValueError):
+        StoreTableMapping(tmp_path / "mappings.json").import_csv(
+            b"product,schema,table\nAIWAF,,logs | search true\n"
+        )

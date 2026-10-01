@@ -1,5 +1,21 @@
 # Logpresso Query Assistant
 
+## 자연어 대시보드 설계
+
+웹 화면의 `대시보드 생성`에서 자연어로 운영 목적을 입력하면 패널별 쿼리, 시각화, 단위, 임계치와 12열 배치를 포함한 대시보드 정의를 생성합니다.
+
+- 공통 운영 템플릿: 라이선스와 로그 수집 상태 8개 패널
+- 제품별 템플릿: 제조사, Store 제품, 로그 형식의 공개 필드에 맞춘 동적 패널
+- 편집: 제목, 설명, 패널 제목, 시각화, 단위, 쿼리, 임계치, 위치와 크기
+- 검증: 모든 패널의 문법, 스키마, 권한 및 성능 경고 일괄 표시
+- 내보내기: 이식 가능한 JSON 및 YAML 정의
+
+실제 Logpresso 대시보드 API 연결 전까지는 JSON/YAML이 배포 계약 형식이며, 제품별 템플릿은 동일한 `scope`와 `panels` 모델로 계속 확장할 수 있습니다.
+
+설계한 대시보드는 API에서 저장·조회·복제·삭제할 수 있고 모든 수정은 리비전으로 보존됩니다. 리비전 비교와 복원, 방화벽/WAF/IPS/VPN/NAC/EDR 제품군 템플릿, 사용자 정의 변수, 쿼리 부하 분석 및 Logpresso 배포 계획 생성도 지원합니다. 실제 서버 배포는 대상 버전의 API 계약과 TLS 검증을 완료한 뒤에만 활성화하는 안전 경계로 분리되어 있습니다.
+
+Store 카탈로그의 제조사 39개, 제품 64개, Syslog 형식 470개를 대시보드 예시로 자동 노출합니다. 상세 필드가 있는 형식은 IP·포트·사용자·행위·위험도·시그니처·장비·정책·국가·트래픽 패널을 조합하고, 필드가 없는 형식은 전체 건수와 최근 이벤트 중심의 기본 안전 구성을 사용합니다.
+
 Logpresso Query Assistant는 자연어 요청을 Logpresso 쿼리 초안으로 변환하는 FastAPI + Streamlit 기반 도구입니다. 제공된 Logpresso 문서를 BM25 방식으로 검색하고, 규칙 기반 파서와 선택적 LLM provider를 조합해 쿼리를 생성합니다.
 
 이 프로젝트는 **쿼리를 자동 실행하지 않습니다.** 생성, 검증, 품질 진단, 실행 준비 정보까지만 제공하며, 사용자가 결과를 검토한 뒤 Logpresso에서 직접 실행하는 흐름을 전제로 합니다.
@@ -162,7 +178,11 @@ API를 사용하는 경우 다음 엔드포인트를 제공합니다.
 - `GET /api/v1/store-schema/status`: 카탈로그 버전과 커버리지
 - `GET /api/v1/store-schema/products`, `GET /api/v1/store-schema/search?q=...`: 목록과 검색
 - `GET|PUT /api/v1/store-schema/mappings`: 실제 테이블 매핑 조회·저장
+- `GET /api/v1/store-schema/mappings.csv`, `POST /api/v1/store-schema/mappings/import`: 매핑 CSV 내보내기·일괄 등록
+- `GET /api/v1/store-schema/coverage?missing_only=true`: 필드 미공개 스키마 우선 보강 목록
 - `POST /api/v1/store-schema/raw/validate`: 공개 Raw 양식 구조 검증
+- `POST /api/v1/store-schema/raw/detect`: Raw 로그의 제품·형식 후보 자동 판별
+- `GET /api/v1/store-schema/preflight`: 테이블·필드 준비 상태 진단
 - `POST /api/v1/store-schema/import/xlsx?apply=false`: Excel 변경 미리보기
 - `POST /api/v1/store-schema/import/xlsx?apply=true`: 검토한 Excel 적용
 
@@ -173,6 +193,8 @@ python scripts\build_store_schema_knowledge.py <Store-카탈로그.xlsx> app\res
 ```
 
 스키마 필드는 파싱 후 정규화된 필드입니다. 장비의 Raw Syslog 순서·구분자와 동일하다고 가정하지 않으며, 공개 Raw 형식이 없는 제품은 실제 장비 샘플로 최종 검증해야 합니다.
+
+실제 Logpresso 검증 전용 API가 준비된 환경에서는 `ENABLE_EXTERNAL_VERIFICATION=true`와 `LOGPRESSO_VERIFICATION_URL`을 명시적으로 설정할 수 있습니다. HTTPS(또는 localhost) 검증 전용 엔드포인트만 허용하며 `{ "query": "...", "dry_run": true }`만 전송합니다. 기본값은 비활성화이므로 고객 시스템에 연결하지 않습니다.
 
 ## 문서 인덱싱
 

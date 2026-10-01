@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import csv
+from io import StringIO
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -56,6 +58,36 @@ class StoreTableMapping:
                 item for item in self.list()
                 if not (item["product"] == product and item.get("schema") == schema)
             ]
+            self._write(items)
+        return items
+
+    def export_csv(self) -> str:
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=["product", "schema", "table"], lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(self.list())
+        return output.getvalue()
+
+    def import_csv(self, content: bytes) -> list[dict[str, str | None]]:
+        try:
+            text = content.decode("utf-8-sig")
+            rows = list(csv.DictReader(StringIO(text)))
+        except (UnicodeDecodeError, csv.Error) as error:
+            raise ValueError("매핑 CSV를 읽을 수 없습니다.") from error
+        if not rows or set(rows[0]) != {"product", "schema", "table"}:
+            raise ValueError("CSV 헤더는 product,schema,table 이어야 합니다.")
+        validated = []
+        for number, row in enumerate(rows, start=2):
+            product = (row.get("product") or "").strip()
+            schema = (row.get("schema") or "").strip() or None
+            table = (row.get("table") or "").strip()
+            if not product or not TABLE_RE.fullmatch(table):
+                raise ValueError(f"CSV {number}행의 제품 또는 테이블 이름이 올바르지 않습니다.")
+            validated.append({"product": product, "schema": schema, "table": table})
+        with self._lock:
+            merged = {(item["product"], item.get("schema")): item for item in self.list()}
+            merged.update({(item["product"], item.get("schema")): item for item in validated})
+            items = sorted(merged.values(), key=lambda item: (str(item["product"]), str(item.get("schema") or "")))
             self._write(items)
         return items
 

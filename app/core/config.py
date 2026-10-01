@@ -21,6 +21,7 @@ class Settings:
     catalog_path: Path = data_dir / "catalog.json"
     store_schema_path: Path = data_dir / "store-schema.json"
     store_table_mapping_path: Path = data_dir / "store-table-mappings.json"
+    dashboard_db_path: Path = data_dir / "dashboards.db"
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -38,6 +39,10 @@ class Settings:
     retrieval_limit: int = int(os.getenv("RETRIEVAL_LIMIT", "8"))
     auto_index_documents: bool = os.getenv("AUTO_INDEX_DOCUMENTS", "true").lower() in {"1", "true", "yes"}
     enable_dev_evaluation: bool = os.getenv("ENABLE_DEV_EVALUATION", "false").lower() in {"1", "true", "yes"}
+    enable_external_verification: bool = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "false").lower() in {"1", "true", "yes"}
+    verification_url: str | None = os.getenv("LOGPRESSO_VERIFICATION_URL") or None
+    verification_token: str | None = os.getenv("LOGPRESSO_VERIFICATION_TOKEN") or None
+    verification_timeout_seconds: float = max(1.0, min(float(os.getenv("LOGPRESSO_VERIFICATION_TIMEOUT_SECONDS", "10")), 30.0))
     # Optional shared-deployment boundary. Leave unset for local single-user use.
     management_api_key: str | None = os.getenv("MANAGEMENT_API_KEY") or None
     ui_auth_enabled: bool = os.getenv("UI_AUTH_ENABLED", "false").lower() in {"1", "true", "yes"}

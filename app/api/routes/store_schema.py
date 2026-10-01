@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -24,6 +24,11 @@ class RawValidationRequest(BaseModel):
     product: str = Field(min_length=1, max_length=200)
     log_type: str = Field(min_length=1, max_length=200)
     raw_line: str = Field(min_length=1, max_length=100_000)
+
+
+class RawDetectionRequest(BaseModel):
+    raw_line: str = Field(min_length=1, max_length=100_000)
+    product: str | None = Field(default=None, max_length=200)
 
 
 def knowledge() -> StoreSchemaKnowledge:
@@ -51,9 +56,36 @@ def search_store_schema(q: str = Query(min_length=1, max_length=200), limit: int
     return {"items": knowledge().search(q, limit)}
 
 
+@router.get("/coverage")
+def store_schema_coverage(missing_only: bool = False, limit: int = Query(500, ge=1, le=2_000)):
+    return {"items": knowledge().coverage(missing_only=missing_only, limit=limit)}
+
+
 @router.get("/mappings")
 def list_table_mappings():
     return {"items": StoreTableMapping(settings.store_table_mapping_path).list()}
+
+
+@router.get("/mappings.csv")
+def export_table_mappings():
+    return Response(
+        StoreTableMapping(settings.store_table_mapping_path).export_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="store-table-mappings.csv"'},
+    )
+
+
+@router.post("/mappings/import", dependencies=[Depends(require_management_access)])
+async def import_table_mappings(request: Request, file: UploadFile = File(...)):
+    try:
+        items = StoreTableMapping(settings.store_table_mapping_path).import_csv(await file.read())
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    AuditStore(settings.db_path).record(
+        "store_schema.mapping_import", file.filename or "mappings.csv", actor=audit_actor(request),
+        metadata={"mapping_count": len(items)},
+    )
+    return {"items": items}
 
 
 @router.put("/mappings", dependencies=[Depends(require_management_access)])
@@ -74,6 +106,17 @@ def save_table_mapping(request: Request, payload: TableMappingRequest):
 @router.post("/raw/validate")
 def validate_raw_format(payload: RawValidationRequest):
     return knowledge().validate_raw(payload.product, payload.log_type, payload.raw_line)
+
+
+@router.post("/raw/detect")
+def detect_raw_format(payload: RawDetectionRequest):
+    return {"items": knowledge().detect_raw(payload.raw_line, payload.product or None)}
+
+
+@router.get("/preflight")
+def store_schema_preflight(product: str, schema: str | None = None):
+    mapping = StoreTableMapping(settings.store_table_mapping_path).resolve(product, schema)
+    return knowledge().preflight(product, schema, mapping)
 
 
 @router.post("/import/xlsx", dependencies=[Depends(require_management_access)])

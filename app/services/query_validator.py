@@ -19,6 +19,11 @@ KNOWN_OPTIONS = {
     "streamjoin": {"type", "timeout"},
 }
 ADMIN_COMMANDS = {"system", "admin", "delete", "drop", "truncate"}
+CURATED_DASHBOARD_COMMANDS = {"confdb", "parsekv", "system", "dbquery", "sonar", "order", "rex"}
+CURATED_DASHBOARD_FUNCTIONS = {
+    "case", "contains", "date", "dateadd", "datediff", "datetrunc", "format",
+    "groups", "if", "isnotnull", "len", "round", "seq", "string", "valueof",
+}
 EXCLUSIVE_TIME_OPTION_COMMANDS = {"table", "fulltext"}
 
 
@@ -44,7 +49,7 @@ class QueryValidator:
             errors.append(ValidationIssue(code="unbalanced_quotes", message="따옴표 쌍이 닫히지 않았습니다."))
 
         for command in commands:
-            if not self.retriever.command_exists(command):
+            if command not in CURATED_DASHBOARD_COMMANDS and not self.retriever.command_exists(command):
                 errors.append(
                     ValidationIssue(
                         code="unknown_command",
@@ -53,7 +58,7 @@ class QueryValidator:
                     )
                 )
         for function in functions:
-            if not self.retriever.function_exists(function):
+            if function not in CURATED_DASHBOARD_FUNCTIONS and not self.retriever.function_exists(function):
                 warnings.append(
                     ValidationIssue(
                         code="unknown_function",

@@ -5,13 +5,13 @@ if (-not $Destination) { $Destination = Join-Path $repo "backups" }
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $archive = Join-Path $Destination "logpresso-data-$stamp.zip"
-$data = Join-Path $repo ".docker-dev"
-if (-not (Test-Path $data)) { $data = Join-Path $repo "data" }
+$configuredData = if ($env:LOGPRESSO_DATA_DIR) { $env:LOGPRESSO_DATA_DIR } else { ".docker-dev" }
+$data = Join-Path $repo $configuredData
 if (-not (Test-Path $data)) { throw "백업할 데이터 디렉터리가 없습니다." }
 $docker = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
 if (-not (Test-Path $docker)) { $docker = (Get-Command docker).Source }
 $env:COMPOSE_PROJECT_NAME = "logpresso-dev"
-$env:LOGPRESSO_DATA_DIR = ".docker-dev"
+$env:LOGPRESSO_DATA_DIR = $configuredData
 Set-Location $repo
 & $docker compose stop | Out-Host
 try {
