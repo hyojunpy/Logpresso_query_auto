@@ -196,6 +196,12 @@ python scripts\build_store_schema_knowledge.py <Store-카탈로그.xlsx> app\res
 
 실제 Logpresso 검증 전용 API가 준비된 환경에서는 `ENABLE_EXTERNAL_VERIFICATION=true`와 `LOGPRESSO_VERIFICATION_URL`을 명시적으로 설정할 수 있습니다. HTTPS(또는 localhost) 검증 전용 엔드포인트만 허용하며 `{ "query": "...", "dry_run": true }`만 전송합니다. 기본값은 비활성화이므로 고객 시스템에 연결하지 않습니다.
 
+### Logpresso 운영 환경 동기화
+
+`.env`에 `LOGPRESSO_BASE_URL`, `LOGPRESSO_API_KEY`, `LOGPRESSO_VERIFY_TLS`를 설정하면 웹 UI의 **고급 설정 · 운영 관리 → Logpresso 환경 동기화**에서 수집기, 테이블, 로그 스키마, 파서와 수집기 모델 메타데이터를 읽어올 수 있습니다. 저장되는 스냅샷은 허용 목록 기반이며 수집기 `configs`, 비밀번호, API 키, 스트림 쿼리는 보관하지 않습니다. 동기화 결과로 제품별 실제 테이블을 추천하고 쿼리 생성에 자동 반영합니다.
+
+원격 생성·수정·활성화 API는 `LOGPRESSO_WRITE_ENABLED` 설정과 무관하게 현재 구현에서 비활성화되어 있습니다. 고객 운영 서버 쓰기 기능은 별도 권한, 승인 흐름, 비운영 검증 환경이 준비된 뒤 추가해야 합니다.
+
 ## 문서 인덱싱
 
 기준 문서를 `docs/로그프레소 쿼리.docx`에 둔 뒤 실행합니다.

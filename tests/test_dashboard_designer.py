@@ -41,8 +41,9 @@ def test_dashboard_exports_are_portable_json_and_yaml():
 
 def test_user_supplied_dashboard_examples_are_exposed_as_presets():
     examples = DashboardDesigner().example_requests()
-    assert len(examples) == 9
+    assert len(examples) == 10
     assert examples[0]["panel_count"] == 8
+    assert examples[1]["title"] == "수집기 상태 및 유실 현황"
     assert {item["title"] for item in examples[1:]} >= {"라이선스 만료일", "수집 속도", "전일 수집기별 수집량"}
 
 

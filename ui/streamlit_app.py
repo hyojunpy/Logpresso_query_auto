@@ -32,6 +32,10 @@ from app.services.metrics_store import MetricsStore, metric_label, operational_o
 from app.services.store_schema_knowledge import StoreSchemaKnowledge
 from app.services.store_schema_update import StoreSchemaUpdate, StoreSchemaUpdateError
 from app.services.store_table_mapping import StoreTableMapping
+from app.services.logpresso_environment import (
+    LogpressoClient, LogpressoConnectionError, LogpressoEnvironmentStore,
+    resolve_synced_table, suggest_table_mappings,
+)
 from app.services.dashboard_designer import DashboardDesigner, dashboard_to_yaml
 from app.services.dashboard_operations import analyze_dashboard, deployment_plan
 from app.services.dashboard_store import DashboardStore
@@ -185,6 +189,7 @@ status = index.status(settings.doc_path)
 catalog_service = CatalogService(settings.catalog_path)
 store_knowledge = StoreSchemaKnowledge.active(settings.store_schema_path)
 store_mapping = StoreTableMapping(settings.store_table_mapping_path)
+environment_store = LogpressoEnvironmentStore(settings.logpresso_snapshot_path)
 
 
 def load_uploaded_catalog(uploaded_file) -> Catalog | None:
@@ -274,6 +279,48 @@ def catalog_from_rows(rows, previous: Catalog | None) -> Catalog:
 
 with st.sidebar.expander("고급 설정 · 운영 관리", expanded=False):
     st.caption("관리자와 고급 사용자를 위한 설정입니다. 일반 쿼리 생성에는 열 필요가 없습니다.")
+    with st.expander("Logpresso 환경 동기화", expanded=False):
+        snapshot = environment_store.load()
+        if settings.logpresso_base_url and settings.logpresso_api_key:
+            st.success("연결 정보 설정됨 · 읽기 전용")
+            st.caption(settings.logpresso_base_url)
+        else:
+            st.warning(".env에 LOGPRESSO_BASE_URL과 LOGPRESSO_API_KEY를 설정하세요.")
+        if snapshot.get("synced_at"):
+            summary = snapshot.get("summary", {})
+            st.caption(f"최근 동기화: {snapshot['synced_at']}")
+            cols = st.columns(4)
+            cols[0].metric("수집기", summary.get("total", 0))
+            cols[1].metric("실행", summary.get("running", 0))
+            cols[2].metric("중지", summary.get("stopped", 0))
+            cols[3].metric("오류", summary.get("failed", 0))
+            st.dataframe(snapshot.get("loggers", []), use_container_width=True, hide_index=True)
+            if snapshot.get("partial_failures"):
+                st.warning("일부 항목은 API 권한 또는 서버 버전 때문에 동기화하지 못했습니다.")
+        if st.button(
+            "환경 연결 및 동기화", key="sync_logpresso_environment",
+            disabled=not (settings.logpresso_base_url and settings.logpresso_api_key and has_role("editor", "admin")),
+        ):
+            try:
+                snapshot = environment_store.sync(LogpressoClient(
+                    settings.logpresso_base_url or "", settings.logpresso_api_key or "",
+                    verify_tls=settings.logpresso_verify_tls, timeout=settings.logpresso_timeout_seconds,
+                ))
+            except (LogpressoConnectionError, ValueError) as error:
+                st.error(str(error))
+            else:
+                st.success(f"수집기 {snapshot['summary']['total']}개를 동기화했습니다.")
+                st.rerun()
+        suggestions = suggest_table_mappings(snapshot.get("loggers", []), store_knowledge.payload.get("products", []))
+        if suggestions:
+            st.caption("제품과 실제 수집기 이름을 비교한 테이블 매핑 후보입니다.")
+            st.dataframe(suggestions, use_container_width=True, hide_index=True)
+            if st.button("추천 매핑 적용", disabled=not has_role("editor", "admin")):
+                for item in suggestions:
+                    store_mapping.save(item["product"], item["table"])
+                st.success(f"추천 매핑 {len(suggestions)}개를 적용했습니다.")
+                st.rerun()
+        st.caption("보안상 수집기 생성·수정·활성화 같은 원격 쓰기 기능은 비활성화되어 있습니다.")
     st.subheader("시스템 상태")
     st.write(f"LLM provider: `{settings.llm_provider}`")
     st.write(f"LLM model: `{settings.ollama_model if settings.llm_provider == 'ollama' else settings.openai_model}`")
@@ -973,7 +1020,9 @@ with selection_col3:
         disabled=not selected_store_product,
         help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
     )
-saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
+saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None) or resolve_synced_table(
+    environment_store.load(), selected_store_product
+)
 with st.expander("조회 테이블 변경", expanded=False):
     st.caption("저장된 매핑이 없을 때만 실제 Logpresso 테이블명을 확인해 주세요.")
     query_store_table = st.text_input(
