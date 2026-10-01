@@ -39,6 +39,23 @@ from app.services.dashboard_store import DashboardStore
 
 st.set_page_config(page_title="로그프레소 자연어 쿼리 생성기", layout="wide")
 
+st.markdown(
+    """
+    <style>
+    .block-container {max-width: 1180px; padding-top: 2rem; padding-bottom: 4rem;}
+    [data-testid="stSidebar"] {min-width: 300px; max-width: 340px;}
+    [data-testid="stSidebar"] h2 {font-size: 1.05rem;}
+    [data-testid="stMetric"] {background: #f7f9fc; border: 1px solid #e7ebf0; border-radius: 12px; padding: .75rem 1rem;}
+    [data-testid="stExpander"] {border-color: #e5e9ef; border-radius: 12px;}
+    div.stButton > button[kind="primary"] {min-height: 2.8rem; font-weight: 700;}
+    .app-eyebrow {color: #64748b; font-size: .85rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;}
+    .app-lead {color: #64748b; margin-top: -.6rem; margin-bottom: 1.5rem;}
+    .section-kicker {color: #475569; font-size: .9rem; font-weight: 700; margin-bottom: .25rem;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 def require_login() -> None:
     if not settings.ui_auth_enabled:
@@ -255,8 +272,9 @@ def catalog_from_rows(rows, previous: Catalog | None) -> Catalog:
         function_type_rules=previous.function_type_rules if previous else [],
     )
 
-with st.sidebar:
-    st.subheader("상태")
+with st.sidebar.expander("고급 설정 · 운영 관리", expanded=False):
+    st.caption("관리자와 고급 사용자를 위한 설정입니다. 일반 쿼리 생성에는 열 필요가 없습니다.")
+    st.subheader("시스템 상태")
     st.write(f"LLM provider: `{settings.llm_provider}`")
     st.write(f"LLM model: `{settings.ollama_model if settings.llm_provider == 'ollama' else settings.openai_model}`")
     st.caption("모델 변경은 `.env`의 `OLLAMA_MODEL` 또는 `OPENAI_MODEL`을 바꾼 뒤 서버를 재시작하면 적용됩니다.")
@@ -684,19 +702,29 @@ with st.sidebar:
                         hide_index=True,
                     )
 
-st.title("로그프레소 자연어 쿼리 생성기")
+st.markdown('<div class="app-eyebrow">LOGPRESSO ASSISTANT</div>', unsafe_allow_html=True)
+st.title("필요한 로그를 자연어로 조회하세요")
+st.markdown(
+    '<div class="app-lead">제품과 로그 형식을 선택하고 원하는 내용을 입력하면 검증된 Logpresso 쿼리 또는 대시보드 초안을 만듭니다.</div>',
+    unsafe_allow_html=True,
+)
 
-work_mode = st.radio("작업 유형", ["쿼리 생성", "대시보드 생성"], horizontal=True)
+work_mode = st.radio(
+    "작업 유형",
+    ["쿼리 생성", "대시보드 생성"],
+    horizontal=True,
+    captions=["로그 검색·집계 쿼리", "여러 패널로 구성된 화면"],
+)
 if work_mode == "대시보드 생성":
-    st.subheader("자연어 대시보드 설계")
-    st.caption("공통 운영 대시보드 또는 제조사·제품·로그 형식별 보안 대시보드를 설계합니다.")
+    st.subheader("대시보드 만들기")
+    st.caption("필요한 화면을 설명하거나 준비된 예시에서 시작하세요.")
     dashboard_designer = DashboardDesigner()
     dashboard_examples = dashboard_designer.example_requests()
     example_by_label = {
         f"{item['title']} · 패널 {item['panel_count']}개": item
         for item in dashboard_examples
     }
-    with st.expander(f"제공받은 운영 대시보드 예시 · {len(dashboard_examples) - 1}종", expanded=True):
+    with st.expander(f"빠른 시작 · 운영 대시보드 {len(dashboard_examples) - 1}종", expanded=False):
         example_label = st.selectbox(
             "대시보드 예시",
             list(example_by_label),
@@ -711,7 +739,7 @@ if work_mode == "대시보드 생성":
             st.session_state.pop("dashboard_record_id", None)
             st.rerun()
     syslog_examples = dashboard_designer.product_example_catalog()
-    with st.expander(f"고객사 Syslog 대시보드 예시 · {len(syslog_examples)}종", expanded=True):
+    with st.expander(f"빠른 시작 · 제품별 Syslog 대시보드 {len(syslog_examples)}종", expanded=False):
         example_manufacturers = list(dict.fromkeys(
             str(item["manufacturer"]) for item in syslog_examples if item.get("manufacturer")
         ))
@@ -924,7 +952,8 @@ store_products = store_knowledge.payload.get("products", [])
 manufacturers = list(dict.fromkeys(
     str(item.get("manufacturer")) for item in store_products if item.get("manufacturer")
 ))
-selection_col1, selection_col2 = st.columns(2)
+st.markdown('<div class="section-kicker">1 · 조회 대상</div>', unsafe_allow_html=True)
+selection_col1, selection_col2, selection_col3 = st.columns(3)
 with selection_col1:
     selected_manufacturer = st.selectbox("제조사", [""] + manufacturers)
 product_options = [
@@ -937,20 +966,23 @@ selected_product_data = next(
     (item for item in store_products if item.get("name") == selected_store_product), None
 )
 schema_options = [str(item.get("name")) for item in (selected_product_data or {}).get("schemas", [])]
-selected_store_schema = st.selectbox(
-    "로그 형식",
-    [""] + schema_options,
-    disabled=not selected_store_product,
-    help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
-)
+with selection_col3:
+    selected_store_schema = st.selectbox(
+        "로그 형식",
+        [""] + schema_options,
+        disabled=not selected_store_product,
+        help="제품을 먼저 선택하면 해당 제품에서 수집 가능한 Syslog 형식만 표시됩니다.",
+    )
 saved_store_table = store_mapping.resolve(selected_store_product, selected_store_schema or None)
-query_store_table = st.text_input(
-    "조회 테이블",
-    value=saved_store_table or ("secui_events" if selected_store_product else ""),
-    disabled=not selected_store_product,
-    help="테스트 기본값은 secui_events입니다. 실제 환경의 테이블명이 다르면 변경하세요.",
-    key=f"query_store_table::{selected_store_product}::{selected_store_schema}",
-)
+with st.expander("조회 테이블 변경", expanded=False):
+    st.caption("저장된 매핑이 없을 때만 실제 Logpresso 테이블명을 확인해 주세요.")
+    query_store_table = st.text_input(
+        "조회 테이블",
+        value=saved_store_table or ("secui_events" if selected_store_product else ""),
+        disabled=not selected_store_product,
+        help="테스트 기본값은 secui_events입니다. 실제 환경의 테이블명이 다르면 변경하세요.",
+        key=f"query_store_table::{selected_store_product}::{selected_store_schema}",
+    )
 mapped_store_table = query_store_table.strip() or None
 selected_schema_data = next(
     (item for item in (selected_product_data or {}).get("schemas", []) if item.get("name") == selected_store_schema),
@@ -977,7 +1009,7 @@ if selected_store_product:
             }
             for field in selected_schema_data.get("fields", [])
         ]
-        with st.expander(f"선택된 로그 형식 필드 {field_count}개", expanded=True):
+        with st.expander(f"선택된 로그 형식 필드 {field_count}개", expanded=False):
             st.dataframe(
                 field_rows,
                 width="stretch",
@@ -988,8 +1020,9 @@ if selected_store_product:
     elif selected_store_schema:
         st.warning("이 로그 형식은 공개 필드가 없어 제품·형식 힌트 중심으로 생성됩니다.")
 else:
-    st.caption("제품을 모르는 경우 선택하지 않고 요청문에 제품명·로그 종류·조건을 직접 적어도 됩니다.")
+    st.caption("제품을 몰라도 괜찮습니다. 아래 요청에 제품명이나 로그 종류를 함께 적어 주세요.")
 
+st.markdown('<div class="section-kicker">2 · 원하는 결과</div>', unsafe_allow_html=True)
 request_placeholder = "예: 최근 24시간 출발지 IP별 차단 건수를 많은 순으로 20개 보여줘"
 if selected_store_schema:
     request_placeholder = f"예: 최근 24시간 {selected_store_schema}에서 출발지 IP별 건수를 보여줘"
@@ -1256,7 +1289,7 @@ if response:
         versions = st.session_state.get("query_versions", [])
         if isinstance(version_to_restore, int) and 0 <= version_to_restore < len(versions):
             st.session_state["editable_query"] = versions[version_to_restore]
-    tabs = st.tabs(["생성 쿼리", "설명", "검증", "문서 근거", "구조", "구조화 요청", "디버그"])
+    tabs = st.tabs(["생성 쿼리", "설명", "검증", "근거", "고급 정보"])
     with tabs[0]:
         if needs_clarification:
             for question in response.get("questions", []):
@@ -1399,7 +1432,7 @@ if response:
     with tabs[4]:
         st.graphviz_chart(query_structure_dot(response.get("intent") or {}), use_container_width=True)
         st.caption("이 화면은 생성 계획을 시각화한 것이며, Logpresso 실행을 수행하지 않습니다.")
-    with tabs[5]:
+    with tabs[4]:
         debug = response.get("debug", {})
         if response.get("assumptions") or debug.get("llm_intent_fallback"):
             st.subheader("AI 해석 결과")
@@ -1408,27 +1441,26 @@ if response:
             for assumption in response.get("assumptions", []):
                 st.warning(f"추정: {assumption}")
         st.json(response.get("intent", {}))
-    with tabs[6]:
-        st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
+        with st.expander("디버그 데이터"):
+            st.code(json.dumps(response.get("debug", {}), ensure_ascii=False, indent=2))
 
-    st.divider()
-    st.subheader("생성 결과 피드백")
-    feedback_rating = st.selectbox("평가", ["positive", "neutral", "negative"], format_func={"positive": "좋음", "neutral": "보통", "negative": "개선 필요"}.get)
-    feedback_issue = st.selectbox("문제 유형", ["", "wrong_table", "wrong_field", "wrong_time_range", "invalid_syntax", "unsafe_query", "irrelevant_query", "other"], format_func=lambda value: "선택 안 함" if not value else value)
-    feedback_comment = st.text_area("의견", max_chars=1000)
-    if st.button("피드백 저장"):
-        saved = FeedbackStore(settings.db_path).save(
-            FeedbackRequest(
-                request_text=request_text,
-                generated_query=response.get("query"),
-                result_status=response.get("status", "unknown"),
-                rating=feedback_rating,
-                issue_type=feedback_issue or None,
-                feedback_comment=feedback_comment or None,
+    with st.expander("생성 결과 피드백", expanded=False):
+        feedback_rating = st.selectbox("평가", ["positive", "neutral", "negative"], format_func={"positive": "좋음", "neutral": "보통", "negative": "개선 필요"}.get)
+        feedback_issue = st.selectbox("문제 유형", ["", "wrong_table", "wrong_field", "wrong_time_range", "invalid_syntax", "unsafe_query", "irrelevant_query", "other"], format_func=lambda value: "선택 안 함" if not value else value)
+        feedback_comment = st.text_area("의견", max_chars=1000)
+        if st.button("피드백 저장"):
+            saved = FeedbackStore(settings.db_path).save(
+                FeedbackRequest(
+                    request_text=request_text,
+                    generated_query=response.get("query"),
+                    result_status=response.get("status", "unknown"),
+                    rating=feedback_rating,
+                    issue_type=feedback_issue or None,
+                    feedback_comment=feedback_comment or None,
+                )
             )
-        )
-        st.success(f"피드백 #{saved['id']}가 저장되었습니다.")
-        st.caption("원문 요청과 쿼리는 저장하지 않았습니다.")
+            st.success(f"피드백 #{saved['id']}가 저장되었습니다.")
+            st.caption("원문 요청과 쿼리는 저장하지 않았습니다.")
 
 with st.expander("기존 쿼리 분석"):
     analysis_query = st.text_area("분석할 Logpresso 쿼리", height=140)
