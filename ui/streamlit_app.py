@@ -758,10 +758,82 @@ st.markdown(
 
 work_mode = st.radio(
     "작업 유형",
-    ["쿼리 생성", "대시보드 생성"],
+    ["쿼리 생성", "대시보드 생성", "환경 정보"],
     horizontal=True,
-    captions=["로그 검색·집계 쿼리", "여러 패널로 구성된 화면"],
+    captions=["로그 검색·집계 쿼리", "여러 패널로 구성된 화면", "실제 수집기·테이블·필드 조회"],
 )
+if work_mode == "환경 정보":
+    snapshot = environment_store.load()
+    st.subheader("Logpresso 환경 정보")
+    if not snapshot.get("synced_at"):
+        st.warning("아직 동기화된 정보가 없습니다. 왼쪽 고급 설정에서 환경 연결 및 동기화를 실행하세요.")
+        st.stop()
+    summary = snapshot.get("summary", {})
+    st.caption(f"최근 동기화: {snapshot['synced_at']} · 읽기 전용 스냅샷")
+    metrics = st.columns(5)
+    metrics[0].metric("수집기", summary.get("total", 0))
+    metrics[1].metric("실행 중", summary.get("running", 0))
+    metrics[2].metric("테이블", len(snapshot.get("tables", [])))
+    metrics[3].metric("로그 스키마", len(snapshot.get("schemas", [])))
+    metrics[4].metric("필드", len(snapshot.get("schema_fields", [])))
+    search = st.text_input("환경 정보 검색", placeholder="수집기명, 테이블명, 스키마, 필드 표시명 검색")
+
+    def filtered_rows(rows: list[dict]) -> list[dict]:
+        needle = search.strip().casefold()
+        if not needle:
+            return rows
+        return [row for row in rows if needle in " ".join(str(value) for value in row.values()).casefold()]
+
+    logger_tab, table_tab, schema_tab, parser_tab, model_tab = st.tabs(
+        ["수집기", "테이블", "스키마·필드", "파서", "수집기 모델"]
+    )
+    with logger_tab:
+        logger_rows = filtered_rows(snapshot.get("loggers", []))
+        st.caption(f"{len(logger_rows)}개 · 상태와 수집량, 연결된 실제 테이블을 확인합니다.")
+        st.dataframe(logger_rows, use_container_width=True, hide_index=True)
+    with table_tab:
+        table_rows = []
+        for table in snapshot.get("tables", []):
+            row = dict(table)
+            row["logger_count"] = sum(
+                logger.get("table_name") == table.get("table_name") for logger in snapshot.get("loggers", [])
+            )
+            table_rows.append(row)
+        table_rows = filtered_rows(table_rows)
+        st.caption(f"{len(table_rows)}개 · 보존 기간과 저장 크기, 연결 수집기 수를 확인합니다.")
+        st.dataframe(table_rows, use_container_width=True, hide_index=True)
+    with schema_tab:
+        schemas = snapshot.get("schemas", [])
+        schema_by_code = {str(item.get("code")): item for item in schemas}
+        schema_options = [""] + [str(item.get("code")) for item in schemas]
+        selected_schema_code = st.selectbox(
+            "로그 스키마 선택", schema_options,
+            format_func=lambda code: "전체 스키마" if not code else f"{schema_by_code[code].get('name')} ({code})",
+        )
+        schema_rows = filtered_rows([
+            {**schema, "field_count": sum(field.get("schema_code") == schema.get("code") for field in snapshot.get("schema_fields", []))}
+            for schema in schemas
+            if not selected_schema_code or schema.get("code") == selected_schema_code
+        ])
+        st.dataframe(schema_rows, use_container_width=True, hide_index=True)
+        field_rows = [
+            field for field in snapshot.get("schema_fields", [])
+            if not selected_schema_code or field.get("schema_code") == selected_schema_code
+        ]
+        field_rows = filtered_rows(field_rows)
+        st.caption(f"필드 {len(field_rows)}개 · 필드명, 표시명, 자료형을 조회할 수 있습니다.")
+        st.dataframe(field_rows, use_container_width=True, hide_index=True)
+    with parser_tab:
+        parser_rows = filtered_rows(snapshot.get("parsers", []))
+        st.caption(f"{len(parser_rows)}개")
+        st.dataframe(parser_rows, use_container_width=True, hide_index=True)
+    with model_tab:
+        model_rows = filtered_rows(snapshot.get("logger_models", []))
+        st.caption(f"{len(model_rows)}개 · 민감 설정 원문은 표시하지 않습니다.")
+        st.dataframe(model_rows, use_container_width=True, hide_index=True)
+    if snapshot.get("partial_failures"):
+        st.warning("일부 메타데이터는 API 권한 또는 서버 버전 때문에 동기화되지 않았습니다.")
+    st.stop()
 if work_mode == "대시보드 생성":
     st.subheader("대시보드 만들기")
     st.caption("필요한 화면을 설명하거나 준비된 예시에서 시작하세요.")

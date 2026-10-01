@@ -21,6 +21,20 @@ def test_client_paginates_and_redacts_sensitive_values():
     assert client.loggers() == [{"name": "AXGATE NGFW", "table_name": "axgate_events"}]
 
 
+def test_client_loads_schema_fields_with_safe_metadata_only():
+    def handler(request: httpx.Request):
+        assert request.url.path == "/api/sonar/log-schemas/session/fields"
+        return httpx.Response(200, json={"schema_fields": [{
+            "name": "src_ip", "display_name": "출발지 IP", "type": "IP", "ordinal": 1,
+            "internal_config": "never-store",
+        }]})
+
+    client = LogpressoClient("https://logpresso.local", "secret", transport=httpx.MockTransport(handler))
+    assert client.schema_fields([{"code": "session"}]) == [{
+        "schema_code": "session", "name": "src_ip", "display_name": "출발지 IP", "type": "IP", "ordinal": 1,
+    }]
+
+
 def test_connection_error_does_not_leak_response_or_key():
     client = LogpressoClient(
         "https://logpresso.local", "secret",
@@ -38,6 +52,7 @@ def test_store_sync_keeps_safe_snapshot_and_partial_failures(tmp_path):
         def log_schemas(self): return []
         def parsers(self): raise LogpressoConnectionError("권한 없음")
         def tables(self): return [{"table_name": "axgate_events"}]
+        def schema_fields(self, schemas): return []
         def logger_models(self, loggers): return []
 
     path = tmp_path / "environment.json"

@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -27,6 +27,7 @@ TABLE_FIELDS = (
     "index_size", "ratio", "group_guid", "group_name", "min_day", "max_day",
 )
 MODEL_FIELDS = ("guid", "name", "description", "version", "factory_name", "created", "updated")
+SCHEMA_FIELD_FIELDS = ("schema_code", "name", "display_name", "type", "ordinal")
 
 
 class LogpressoConnectionError(RuntimeError):
@@ -88,6 +89,23 @@ class LogpressoClient:
     def log_schemas(self) -> list[dict[str, Any]]:
         return self._paged("/api/sonar/log-schemas", "schemas", SCHEMA_FIELDS)
 
+    def schema_fields(self, schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        fields: list[dict[str, Any]] = []
+        for schema in schemas:
+            code = str(schema.get("code") or "").strip()
+            if not code:
+                continue
+            payload = self._get(f"/api/sonar/log-schemas/{quote(code, safe='')}/fields", {"locale": "ko"})
+            rows = payload.get("schema_fields", [])
+            if not isinstance(rows, list):
+                raise LogpressoConnectionError("schema_fields 응답 형식이 올바르지 않습니다.")
+            for item in rows:
+                if isinstance(item, dict):
+                    safe_item = self._allow_list(item, SCHEMA_FIELD_FIELDS)
+                    safe_item.setdefault("schema_code", code)
+                    fields.append(safe_item)
+        return fields
+
     def parsers(self) -> list[dict[str, Any]]:
         return self._paged("/api/sonar/parsers", "parsers", PARSER_FIELDS)
 
@@ -138,6 +156,11 @@ class LogpressoEnvironmentStore:
                 failures[name] = str(error)
         if failures.get("loggers"):
             raise LogpressoConnectionError(failures["loggers"])
+        try:
+            resources["schema_fields"] = client.schema_fields(resources["schemas"])
+        except LogpressoConnectionError as error:
+            resources["schema_fields"] = []
+            failures["schema_fields"] = str(error)
         try:
             resources["logger_models"] = client.logger_models(resources["loggers"])
         except LogpressoConnectionError as error:
